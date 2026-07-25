@@ -10,6 +10,7 @@ use App\Conversation\Application\Query\ConversationView;
 use App\Conversation\Domain\DirectKey;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
+use App\Shared\Infrastructure\Persistence\DatabaseTimestamp;
 use Doctrine\DBAL\Connection;
 
 /** Cote lecture : SQL direct vers un DTO, sans passer par le domaine. */
@@ -47,7 +48,7 @@ final readonly class DbalConversationReader implements ConversationReaderInterfa
                 $row['id'],
                 $row['type'],
                 $row['title'],
-                $row['last_message_at'],
+                DatabaseTimestamp::toAtom($row['last_message_at']),
                 $row['last_message_preview'],
                 $row['last_message_sender_id'],
             ),

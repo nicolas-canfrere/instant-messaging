@@ -62,6 +62,7 @@ services:
     App\Conversation\Application\LastMessagePointerWriterInterface: '@App\Conversation\Infrastructure\Persistence\DbalLastMessagePointerWriter'
     App\Message\Domain\MessageRepositoryInterface: '@App\Message\Infrastructure\Persistence\DbalMessageRepository'
     App\Message\Application\Query\MessageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessageReader'
+    App\Message\Application\Query\MessagePageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessagePageReader'
     App\Shared\Application\Bus\CommandDispatcherInterface: '@App\Shared\Infrastructure\Bus\CommandDispatcher'
 
     # Le meme convertisseur que celui du serialiseur, pour que les chemins de

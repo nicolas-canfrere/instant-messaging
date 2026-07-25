@@ -197,6 +197,42 @@ final class SendMessageTest extends DatabaseTestCase
         self::fail('Conversation absente de la liste.');
     }
 
+    /**
+     * Le front fusionne l'historique et le flux temps reel dans le meme store.
+     * Si `created_at` sortait sous deux formes selon sa source, tout tri par
+     * chaine melangerait les deux — l'espace se classant avant le « T ».
+     */
+    public function testTheSentAtFormatIsIdenticalInHistoryAndInThePublishedEvent(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+
+        $publisher = static::getContainer()->get(InMemoryEventPublisher::class);
+
+        $this->send($conversationId, self::CLIENT_ID, 'bonjour');
+
+        $published = array_values(array_filter(
+            $publisher->published(),
+            static fn(array $entry): bool => 'message.created' === $entry['type'],
+        ));
+
+        $this->client->request('GET', sprintf('/api/conversations/%s/messages', $conversationId));
+
+        /** @var array{items: list<array{created_at: string}>} $page */
+        $page = json_decode(
+            (string) $this->client->getResponse()->getContent(),
+            true,
+            512,
+            \JSON_THROW_ON_ERROR,
+        );
+
+        self::assertSame($published[0]['payload']['created_at'], $page['items'][0]['created_at']);
+        self::assertMatchesRegularExpression(
+            '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/',
+            $page['items'][0]['created_at'],
+        );
+    }
+
     private function firstConversationId(): string
     {
         return $this->conversations()[0]['id'];
