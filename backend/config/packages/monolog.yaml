@@ -1,13 +1,15 @@
 monolog:
-    channels:
-        - deprecation # Deprecations are logged in the dedicated "deprecation" channel when it exists
+    # Un canal par contexte borne, plus le canal de deprecations du squelette.
+    channels: ['identity', 'conversation', 'message', 'realtime', 'deprecation']
 
 when@dev:
     monolog:
         handlers:
+            # stderr plutot qu'un fichier : les logs sortent par `docker compose logs`,
+            # au meme endroit que ceux des autres services.
             main:
                 type: stream
-                path: "%kernel.logs_dir%/%kernel.environment%.log"
+                path: "php://stderr"
                 level: debug
                 channels: ["!event"]
             console:
@@ -19,35 +21,27 @@ when@test:
     monolog:
         handlers:
             main:
-                type: fingers_crossed
-                action_level: error
-                handler: nested
-                excluded_http_codes: [404, 405]
-                channels: ["!event"]
-            nested:
                 type: stream
-                path: "%kernel.logs_dir%/%kernel.environment%.log"
-                level: debug
+                path: "php://stderr"
+                level: error
 
 when@prod:
     monolog:
         handlers:
+            # `fingers_crossed` garde les lignes debug en memoire et ne les ecrit
+            # QUE si une erreur survient. C'est ce qui rend « logguer abondamment »
+            # soutenable en production.
             main:
                 type: fingers_crossed
                 action_level: error
                 handler: nested
-                excluded_http_codes: [404, 405]
+                buffer_size: 200
                 channels: ["!deprecation"]
-                buffer_size: 50 # How many messages should be saved? Prevent memory leaks
             nested:
                 type: stream
-                path: php://stderr
+                path: "php://stderr"
                 level: debug
                 formatter: monolog.formatter.json
-            console:
-                type: console
-                process_psr_3_messages: false
-                channels: ["!event", "!doctrine"]
             deprecation:
                 type: stream
                 channels: [deprecation]
