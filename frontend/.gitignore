@@ -1,2 +1,4 @@
 node_modules/
 dist/
+# Cache incremental de tsc, genere par `npm run build`.
+tsconfig.tsbuildinfo
