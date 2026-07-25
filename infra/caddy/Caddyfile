@@ -1,0 +1,25 @@
+{
+	# Le seul port exposé est le :80 de ce conteneur, publié en 8080 sur l'hôte.
+	# Pas de nom de domaine, donc pas de certificat à provisionner.
+	auto_https off
+	admin off
+}
+
+:80 {
+	# L'ordre compte : `handle` est exclusif, le premier bloc qui matche gagne.
+	# Le dernier est le fourre-tout vers Vite.
+
+	handle /api/* {
+		reverse_proxy backend:80
+	}
+
+	handle /.well-known/mercure* {
+		# Le hub est un service séparé, jamais fusionné dans FrankenPHP :
+		# c'est la prémisse shared-nothing qui justifie son existence.
+		reverse_proxy mercure:80
+	}
+
+	handle {
+		reverse_proxy frontend:5173
+	}
+}

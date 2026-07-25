@@ -1,3 +1,6 @@
 .idea/
 .vscode/
 node_modules/
+
+# Secrets locaux de docker compose (voir .env.example)
+/.env
