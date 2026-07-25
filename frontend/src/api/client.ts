@@ -81,6 +81,9 @@ export const api = {
   realtimeToken: () => request<RealtimeToken>('/api/realtime/token'),
 
   heartbeat: () => request<HeartbeatResponse>('/api/presence/heartbeat', { method: 'POST' }),
+
+  typing: (conversationId: string) =>
+    request<void>(`/api/conversations/${conversationId}/typing`, { method: 'POST' }),
 };
 
 export type { ApiMessage };

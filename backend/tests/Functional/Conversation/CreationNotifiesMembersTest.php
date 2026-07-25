@@ -87,7 +87,7 @@ final class CreationNotifiesMembersTest extends DatabaseTestCase
     }
 
     /**
-     * @return list<array{topic: string, type: string, payload: array<string, mixed>, id: string}>
+     * @return list<array{topic: string, type: string, payload: array<string, mixed>, id: string|null}>
      */
     private function membershipNotifications(InMemoryEventPublisher $publisher): array
     {

@@ -3,6 +3,8 @@ import { useState, type KeyboardEvent } from 'react';
 type Props = {
   /** Rend la promesse de l'envoi, mais le composant ne l'attend pas : voir `submit`. */
   onSend: (content: string) => Promise<void>;
+  /** Signale la frappe. L'etranglement vit dans `useTyping`, pas ici : ce composant reste bete. */
+  onTyping: () => void;
 };
 
 /**
@@ -10,7 +12,7 @@ type Props = {
  * `client_message_id`, ni le reessai — tout cela vit dans `useAppState`. Elle
  * ne sait que deux choses : quand l'utilisateur veut envoyer, et quoi.
  */
-export function Composer({ onSend }: Props) {
+export function Composer({ onSend, onTyping }: Props) {
   const [content, setContent] = useState('');
 
   // On envoie le contenu debarrasse de ses espaces de bord : un message fait
@@ -43,7 +45,10 @@ export function Composer({ onSend }: Props) {
     <div className="flex items-end gap-2 border-t border-slate-200 bg-white px-4 py-3">
       <textarea
         value={content}
-        onChange={(event) => setContent(event.target.value)}
+        onChange={(event) => {
+          setContent(event.target.value);
+          onTyping();
+        }}
         onKeyDown={handleKeyDown}
         rows={2}
         placeholder="Votre message… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)"

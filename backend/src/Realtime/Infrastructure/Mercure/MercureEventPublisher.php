@@ -18,7 +18,7 @@ final readonly class MercureEventPublisher implements EventPublisherInterface
     ) {
     }
 
-    public function publish(Topic $topic, string $eventType, array $payload, string $eventId): void
+    public function publish(Topic $topic, string $eventType, array $payload, ?string $eventId = null): void
     {
         $data = json_encode(['type' => $eventType, 'payload' => $payload], \JSON_THROW_ON_ERROR);
 

@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import type { ConversationSummary, UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
+import type { TypingState } from '../store/typingReducer';
 import { Composer } from './Composer';
 import { conversationTitle } from './labels';
 import { MembersPanel } from './MembersPanel';
 import { MessageList } from './MessageList';
+import { TypingIndicator } from './TypingIndicator';
 
 type Props = {
   conversation: ConversationSummary;
@@ -12,8 +14,10 @@ type Props = {
   users: Record<string, UserSummary>;
   peers: Record<string, string>;
   meId: string;
+  typingState: TypingState;
   onLoadOlder: () => void;
   onSend: (content: string) => Promise<void>;
+  onTyping: () => void;
 };
 
 export function ConversationView({
@@ -22,8 +26,10 @@ export function ConversationView({
   users,
   peers,
   meId,
+  typingState,
   onLoadOlder,
   onSend,
+  onTyping,
 }: Props) {
   // Etat purement local d'affichage : personne d'autre n'a besoin de savoir si
   // le panneau des membres est ouvert. Il vit donc ici, pas dans `useAppState`.
@@ -82,7 +88,17 @@ export function ConversationView({
           Prefixe different de celui du MessageList ci-dessus : voir l'explication
           la-bas. Deux freres ne peuvent pas porter la meme `key`.
         */}
-        <Composer key={`composer-${conversation.id}`} onSend={onSend} />
+        {/*
+          Entre le fil et la saisie, comme dans toutes les messageries : la ligne
+          apparait et disparait sans jamais deplacer le champ de saisie.
+        */}
+        <TypingIndicator
+          typingState={typingState}
+          conversationId={conversation.id}
+          users={users}
+        />
+
+        <Composer key={`composer-${conversation.id}`} onSend={onSend} onTyping={onTyping} />
       </section>
 
       {conversation.type === 'group' && showMembers && (

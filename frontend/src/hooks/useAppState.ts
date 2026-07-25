@@ -13,7 +13,9 @@ import {
   type StoredMessage,
 } from '../store/messagesReducer';
 import { emptyPresenceState, presenceReducer } from '../store/presenceReducer';
+import { emptyTypingState, typingReducer, type TypingState } from '../store/typingReducer';
 import { useHeartbeat } from './useHeartbeat';
+import { useTyping } from './useTyping';
 
 /**
  * Un message d'historique est deja accepte par le serveur : son statut est
@@ -39,7 +41,7 @@ function fromApiMessage(message: ApiMessage): StoredMessage {
  * declenche QUE pour les evenements sans nom. Sans ces ecoutes explicites, le
  * front resterait muet alors que le hub diffuse correctement.
  */
-const NAMED_EVENTS = ['message.created', 'membership.changed'];
+const NAMED_EVENTS = ['message.created', 'membership.changed', 'typing.started'];
 
 /**
  * Adaptateur entre l'EventSource du navigateur et le port minimal attendu par
@@ -154,6 +156,8 @@ export type AppState = {
   selectedId: string | null;
   messagesState: MessagesState;
   onlineUserIds: Set<string>;
+  typingState: TypingState;
+  notifyTyping: (conversationId: string) => void;
   selectConversation: (conversationId: string) => void;
   loadOlder: () => void;
   refreshConversations: () => Promise<void>;
@@ -173,6 +177,8 @@ export function useAppState(me: Me): AppState {
     undefined,
     emptyPresenceState,
   );
+  const [typingState, dispatchTyping] = useReducer(typingReducer, undefined, emptyTypingState);
+  const notifyTyping = useTyping();
 
   const clientRef = useRef<RealtimeClient | null>(null);
   /**
@@ -428,6 +434,32 @@ export function useAppState(me: Me): AppState {
         if (event.type === 'message.created') {
           dispatch({ type: 'message/received', message: toStoredMessage(event.payload) });
           scheduleConversationsRefresh();
+
+          // Le message est arrive : son auteur n'ecrit plus. Cela remplace un
+          // evenement `typing.stopped` que le backend n'emet volontairement pas.
+          dispatchTyping({
+            type: 'typing/cleared',
+            conversationId: readString(event.payload, 'conversation_id'),
+            userId: readString(event.payload, 'sender_id'),
+          });
+
+          return;
+        }
+
+        if (event.type === 'typing.started') {
+          const userId = readString(event.payload, 'user_id');
+
+          // Sa propre frappe revient par le hub : l'afficher ferait apparaitre
+          // « vous ecrivez… » dans sa propre fenetre.
+          if (userId !== me.id) {
+            dispatchTyping({
+              type: 'typing/started',
+              conversationId: readString(event.payload, 'conversation_id'),
+              userId,
+              now: Date.now(),
+            });
+          }
+
           return;
         }
 
@@ -459,7 +491,7 @@ export function useAppState(me: Me): AppState {
 
       client.stop();
     };
-  }, [refreshConversations]);
+  }, [refreshConversations, me.id]);
 
   // `useCallback([])` : `dispatchPresence` est stable, le hook ne doit donc pas
   // se remonter a chaque rendu — sinon le battement repartirait de zero.
@@ -477,6 +509,8 @@ export function useAppState(me: Me): AppState {
     selectedId,
     messagesState,
     onlineUserIds: presenceState.onlineUserIds,
+    typingState,
+    notifyTyping,
     selectConversation,
     loadOlder,
     refreshConversations,

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { ConversationSummary, UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
+import { emptyTypingState } from '../store/typingReducer';
 import { ConversationView } from './ConversationView';
 
 const ALICE: UserSummary = { id: 'user-alice', username: 'alice', display_name: 'Alice' };
@@ -57,8 +58,12 @@ describe('ConversationView', () => {
       users: { [ALICE.id]: ALICE },
       peers: {},
       meId: 'user-bob',
+      // Personne n'ecrit : l'indicateur ne rend rien et ne perturbe pas le
+      // comptage des `<ul>` plus bas.
+      typingState: emptyTypingState(),
       onLoadOlder: vi.fn(),
       onSend: vi.fn(async () => {}),
+      onTyping: vi.fn(),
     };
 
     const { container, rerender } = render(

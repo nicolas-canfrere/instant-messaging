@@ -63,6 +63,8 @@ function Workspace({ me }: { me: Me }) {
     selectedId,
     messagesState,
     onlineUserIds,
+    typingState,
+    notifyTyping,
     selectConversation,
     loadOlder,
     send,
@@ -99,8 +101,10 @@ function Workspace({ me }: { me: Me }) {
           users={users}
           peers={peers}
           meId={me.id}
+          typingState={typingState}
           onLoadOlder={loadOlder}
           onSend={(content) => send(selected.id, content)}
+          onTyping={() => notifyTyping(selected.id)}
         />
       )}
 
