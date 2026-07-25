@@ -19,6 +19,8 @@ use Symfony\Component\Messenger\Middleware\StackInterface;
  */
 final readonly class TransactionalMiddleware implements MiddlewareInterface
 {
+    use ClassifiesBusFailuresTrait;
+
     public function __construct(
         private Connection $connection,
         private DomainEventCollectorInterface $collector,
@@ -37,10 +39,16 @@ final readonly class TransactionalMiddleware implements MiddlewareInterface
         } catch (\Throwable $throwable) {
             $this->collector->clear();
 
-            $this->logger->error('Transaction annulee, aucun evenement publie ({message_class})', [
+            $context = [
                 'message_class' => $envelope->getMessage()::class,
                 'exception' => $throwable,
-            ]);
+            ];
+
+            if ($this->isExpectedOutcome($throwable)) {
+                $this->logger->warning('Transaction annulee sur refus metier ({message_class})', $context);
+            } else {
+                $this->logger->error('Transaction annulee, aucun evenement publie ({message_class})', $context);
+            }
 
             throw $throwable;
         }

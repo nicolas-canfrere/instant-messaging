@@ -21,4 +21,11 @@ interface ConversationReaderInterface
     public function forMember(UserId $userId): array;
 
     public function directIdForKey(DirectKey $key): ?ConversationId;
+
+    /**
+     * Rend `null` aussi bien si la conversation n'existe pas que si le
+     * demandeur n'en est pas membre : c'est ce cadrage qui produit un 404
+     * indiscernable dans les deux cas.
+     */
+    public function detailFor(ConversationId $conversationId, UserId $requestedBy): ?ConversationDetailView;
 }

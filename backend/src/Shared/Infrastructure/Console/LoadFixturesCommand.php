@@ -58,6 +58,11 @@ final class LoadFixturesCommand extends Command
             );
         }
 
+        // Les valeurs de `type` et de `role` restent litterales ici, alors que
+        // ConversationType et MemberRole existent : cette commande vit dans
+        // Shared, qui ne peut pas dependre du contexte Conversation. Ce sont des
+        // donnees de jeu ecrites au plus pres du SQL qui leur donne un sens, pas
+        // des chaines disseminees dans du code metier.
         $direct = $this->idGenerator->generate();
 
         // La cle d'un direct est la paire d'identifiants triee : elle rend

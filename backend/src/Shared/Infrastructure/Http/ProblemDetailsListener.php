@@ -18,6 +18,8 @@ use Symfony\Component\Messenger\Exception\HandlerFailedException;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 use Symfony\Component\Security\Core\Exception\AuthenticationException;
 use Symfony\Component\Security\Core\Exception\BadCredentialsException;
+use Symfony\Component\Serializer\NameConverter\NameConverterInterface;
+use Symfony\Component\Validator\Exception\ValidationFailedException;
 
 /**
  * Seul endroit du projet ou une exception rencontre HTTP.
@@ -29,6 +31,7 @@ final readonly class ProblemDetailsListener
     public function __construct(
         private CorrelationIdHolder $correlationIdHolder,
         private LoggerInterface $logger,
+        private NameConverterInterface $nameConverter,
     ) {
     }
 
@@ -45,18 +48,22 @@ final readonly class ProblemDetailsListener
 
         $this->log($status, $type, $throwable);
 
-        $event->setResponse(new JsonResponse(
-            [
-                'type' => $type,
-                'title' => $title,
-                'status' => $status,
-                'detail' => $detail,
-                'instance' => $request->getPathInfo(),
-                'correlation_id' => $this->correlationIdHolder->get(),
-            ],
-            $status,
-            ['Content-Type' => 'application/problem+json'],
-        ));
+        $body = [
+            'type' => $type,
+            'title' => $title,
+            'status' => $status,
+            'detail' => $detail,
+            'instance' => $request->getPathInfo(),
+            'correlation_id' => $this->correlationIdHolder->get(),
+        ];
+
+        // Extension RFC 7807 : le client doit savoir QUEL champ corriger sans
+        // avoir a deviner depuis un `detail` en prose.
+        if ($throwable instanceof ValidationFailedException) {
+            $body['violations'] = $this->violations($throwable);
+        }
+
+        $event->setResponse(new JsonResponse($body, $status, ['Content-Type' => 'application/problem+json']));
     }
 
     /**
@@ -83,7 +90,9 @@ final readonly class ProblemDetailsListener
         $previous = $throwable->getPrevious();
 
         if ($throwable instanceof HttpExceptionInterface
-            && ($previous instanceof AuthenticationException || $previous instanceof AccessDeniedException)
+            && ($previous instanceof AuthenticationException
+                || $previous instanceof AccessDeniedException
+                || $previous instanceof ValidationFailedException)
         ) {
             return $previous;
         }
@@ -132,6 +141,12 @@ final readonly class ProblemDetailsListener
                 // par un humain et ne portent ni contenu de message ni secret.
                 $throwable->getMessage(),
             ],
+            $throwable instanceof ValidationFailedException => [
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                '/problems/validation-failed',
+                'Requete invalide',
+                'Un ou plusieurs champs de la requete sont invalides.',
+            ],
             $throwable instanceof \JsonException => [
                 Response::HTTP_BAD_REQUEST,
                 '/problems/malformed-request',
@@ -152,6 +167,25 @@ final readonly class ProblemDetailsListener
                 'Une erreur interne est survenue.',
             ],
         };
+    }
+
+    /** @return list<array{field: string, message: string}> */
+    private function violations(ValidationFailedException $exception): array
+    {
+        $violations = [];
+
+        foreach ($exception->getViolations() as $violation) {
+            $violations[] = [
+                // Le chemin remonte en camelCase, du nom de la propriete PHP.
+                // Le client parle snake_case et n'a pas a connaitre nos noms
+                // internes : on repasse par le meme convertisseur que celui du
+                // serialiseur, plutot que de redire la regle ici.
+                'field' => $this->nameConverter->normalize($violation->getPropertyPath()),
+                'message' => (string) $violation->getMessage(),
+            ];
+        }
+
+        return $violations;
     }
 
     private function log(int $status, string $type, \Throwable $throwable): void

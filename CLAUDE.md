@@ -231,6 +231,40 @@ En 500 : `detail` générique, jamais de message d'exception ni de fragment SQL.
 La traduction exception → statut HTTP vit **uniquement** dans le listener de
 `Shared/Infrastructure`. Les exceptions de `Domain` ignorent HTTP.
 
+### Validation des entrées
+
+**Jamais de `json_decode` dans un contrôleur**, et jamais de `@var array{…}` sur une charge
+utile : une annotation qui décrit ce qu'on espère recevoir ment à PHPStan, exactement comme
+une baseline. Une entrée mal typée doit produire un **422**, jamais un 500.
+
+- Corps de requête : `#[MapRequestPayload]` sur un DTO de
+  `{Contexte}/Infrastructure/Http/Payload/`, avec ses contraintes `Symfony\…\Constraints`.
+- Chaîne de requête : `#[MapQueryString]` pour un DTO, `#[MapQueryParameter]` pour un
+  paramètre isolé.
+- Le contrôleur reçoit donc un objet **déjà désérialisé et validé**.
+
+Les violations sortent en extension RFC 7807, une entrée par champ fautif :
+
+```json
+"violations": [{ "field": "member_ids[0]", "message": "Cet identifiant n'est pas un ULID valide." }]
+```
+
+Le client doit savoir **quel** champ corriger, et les recevoir **toutes** d'un coup — pas les
+découvrir une par une en devinant depuis le `detail`.
+
+Ce qu'une contrainte de champ ne peut pas exprimer — une règle qui dépend d'un autre champ,
+comme « un groupe requiert un titre » — reste dans le contrôleur et lève une exception
+`InvalidInputExceptionInterface`.
+
+Une contrainte ne redéfinit jamais un format déjà défini ailleurs : elle référence
+`AbstractUlidIdentifier::PATTERN` ou `{Enum}::values()`.
+
+Le sérialiseur convertit globalement `snake_case` ↔ `camelCase`
+(`config/packages/serializer.yaml`) : l'API parle snake_case, le PHP camelCase. **Ne pas
+poser de `#[SerializedName]` au cas par cas** — il suffit de l'oublier une fois pour qu'un
+champ arrive vide en silence. Les chemins de violation passent par le même convertisseur :
+le client ne voit jamais un nom de propriété PHP.
+
 ## Temps réel — contrats à ne pas casser
 
 Les tranches suivantes étendent ces mécanismes ; les modifier casserait le front.
