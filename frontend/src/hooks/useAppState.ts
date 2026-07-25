@@ -78,19 +78,26 @@ function readString(payload: Record<string, unknown>, key: string): string {
 /**
  * Charge utile reellement publiee par le backend pour `message.created`
  * (voir `backend/src/Realtime/Application/EventListener/PublishMessageWasSentListener.php`) :
- * `{ id, conversation_id, sender_id, content, created_at }`.
+ * `{ id, conversation_id, sender_id, content, client_message_id, created_at }`.
  *
- * Elle ne transporte PAS de `client_message_id`. On retombe donc sur l'ULID du
- * message comme identifiant client : la premiere passe de deduplication du
- * reducer (par `clientMessageId`) ne peut pas matcher, mais la seconde (par
- * `id` serveur) le fait des que la reponse HTTP de l'envoi a ete acquittee.
+ * Le `client_message_id` transporte est celui que l'expediteur a genere avant
+ * son envoi : c'est lui qui rend effective la PREMIERE passe de deduplication
+ * du reducer. Sans lui, un expediteur dont l'echo SSE arrive avant la reponse
+ * du POST verrait son propre message deux fois — une fois en optimiste, une
+ * fois en recu — jusqu'a l'acquittement.
+ *
+ * Un message venu d'un autre utilisateur porte un `client_message_id` qui ne
+ * correspond a aucun envoi local : la passe 1 ne matche rien, la passe 2 (par
+ * `id` serveur) suffit. Le repli sur l'ULID du message ne sert donc que si le
+ * champ manquait, ce que le backend ne fait plus.
  */
 function toStoredMessage(payload: Record<string, unknown>): StoredMessage {
   const id = readString(payload, 'id');
+  const clientMessageId = readString(payload, 'client_message_id');
 
   return {
     id,
-    clientMessageId: id,
+    clientMessageId: clientMessageId === '' ? id : clientMessageId,
     conversationId: readString(payload, 'conversation_id'),
     senderId: readString(payload, 'sender_id'),
     content: readString(payload, 'content'),
