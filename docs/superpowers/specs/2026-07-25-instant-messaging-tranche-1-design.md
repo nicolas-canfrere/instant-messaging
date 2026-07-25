@@ -331,9 +331,9 @@ src/Message/
 ├── Domain/                      # PHP pur — zéro Symfony, zéro Doctrine
 │   ├── Message.php
 │   ├── MessageId.php  ClientMessageId.php  MessageContent.php
-│   ├── MessageRepository.php            (port secondaire)
+│   ├── MessageRepositoryInterface.php   (port secondaire)
 │   ├── Event/MessageWasSent.php
-│   └── Exception/MessageContentIsEmpty.php …
+│   └── Exception/EmptyMessageContentException.php …
 ├── Application/
 │   ├── Command/SendMessage.php  SendMessageHandler.php
 │   └── Query/GetMessagePage.php  GetMessagePageHandler.php  MessageView.php
@@ -350,15 +350,19 @@ src/Message/
 
 | Port | Type | Implémentation T1 |
 |---|---|---|
-| `ConversationRepository`, `MessageRepository`, `UserRepository` | secondaire | Doctrine **DBAL** + mappers écrits à la main |
-| `EventPublisher` | secondaire | Mercure (`Realtime/Infrastructure`) |
-| `Clock` | secondaire | horloge système |
-| `IdGenerator` | secondaire | ULID via `symfony/uid` |
+| `ConversationRepositoryInterface`, `MessageRepositoryInterface`, `UserRepositoryInterface` | secondaire | Doctrine **DBAL** + mappers écrits à la main |
+| `EventPublisherInterface` | secondaire | Mercure (`Realtime/Infrastructure`) |
+| `Psr\Clock\ClockInterface` (PSR-20) | secondaire | horloge système |
+| `IdGeneratorInterface` | secondaire | ULID via `symfony/uid` |
 | Contrôleurs HTTP → bus | primaire | Symfony |
 
-`Clock` et `IdGenerator` en ports n'est pas du dogmatisme : c'est ce qui rend les tests
-**déterministes** — ULIDs fixes et temps gelé, indispensable pour tester l'ordre des messages et la
-pagination keyset sans flakiness.
+L'horloge et le générateur d'identifiants en ports, ce n'est pas du dogmatisme : c'est ce qui rend les
+tests **déterministes** — ULIDs fixes et temps gelé, indispensable pour tester l'ordre des messages et
+la pagination keyset sans flakiness.
+
+Pour l'horloge on prend **`Psr\Clock\ClockInterface`** (PSR-20) plutôt qu'un port maison : l'interface
+standard existe, la réinventer n'apporterait rien. `psr/clock` rejoint `symfony/uid` dans les
+dépendances autorisées de `Domain/` — c'est une interface normalisée, pas un framework.
 
 ### 3.3 CQS, pas CQRS
 
@@ -483,9 +487,10 @@ signifie « déjà présent » → un `SELECT` récupère l'existant. Le cas nom
 du contrôle de flux ordinaire, pas par une exception — plus lisible, et l'intention est portée par le
 SQL lui-même.
 
-**Exception pragmatique documentée** : `Domain/` dépend de `symfony/uid` pour les ULID. C'est une
-bibliothèque autonome, pas un framework ; réimplémenter un générateur ULID serait du zèle sans bénéfice.
-L'exception est whitelistée explicitement dans `deptrac.yaml`. C'est désormais la **seule**.
+**Exceptions pragmatiques documentées** : `Domain/` dépend de `symfony/uid` (ULID) et de `psr/clock`
+(PSR-20). Ce sont une bibliothèque autonome et une interface normalisée, pas des frameworks ;
+réimplémenter l'une ou l'autre serait du zèle sans bénéfice. Toutes deux sont whitelistées
+explicitement dans `deptrac.yaml`. Ce sont les **seules**.
 
 ### 3.6 Agrégats et frontières
 
@@ -545,6 +550,37 @@ Cette architecture multiplie environ par deux le nombre de fichiers de la tranch
 contrôleurs Symfony classiques. Sur un projet de cette taille, elle ne se justifie **que** par
 l'objectif portfolio et par le fait que les tranches 2 à 5 vont réellement s'y greffer. C'est écrit ici
 pour que le choix reste conscient.
+
+### 3.10 Conventions de nommage
+
+Le backend suit les **conventions de nommage Symfony**
+(<https://symfony.com/doc/current/contributing/code/standards.html#naming-conventions>), sans exception.
+Elles s'appliquent au backend uniquement — le frontend suit les usages TypeScript/React.
+
+| Élément | Convention | Exemple du projet |
+|---|---|---|
+| Classes, interfaces, traits, enums | `UpperCamelCase` | `SendMessageHandler` |
+| **Interfaces** | suffixe `Interface` | `MessageRepositoryInterface` |
+| **Classes abstraites** | préfixe `Abstract` | `AbstractDbalRepository` |
+| **Traits** | suffixe `Trait` | |
+| **Exceptions** | suffixe `Exception` | `EmptyMessageContentException` |
+| Variables, méthodes, arguments | `camelCase` | `$clientMessageId`, `lastMessageAt()` |
+| Constantes | `SCREAMING_SNAKE_CASE` | `MessageContent::MAX_LENGTH` |
+| **Cas d'enum** | `UpperCamelCase` | `ConversationType::Direct`, `MemberRole::Admin` |
+| Noms de routes, paramètres de config | `snake_case` | `conversation_messages_send` |
+| Attributs de config de service | préfixe `As` | `#[AsMessageHandler]` |
+| Fichiers PHP | `UpperCamelCase` | `SendMessageHandler.php` |
+| PHPDoc scalaires | `bool`, `int`, `float` | jamais `boolean`, `integer`, `double` |
+| Fichiers | une classe par fichier | |
+
+**Tension assumée avec l'usage DDD.** Une part de la littérature hexagonale nomme les ports sans
+suffixe — `MessageRepository` pour le port, `DbalMessageRepository` pour l'implémentation — au motif que
+le port *est* le concept et que c'est l'implémentation qui mérite un qualificatif. **On ne suit pas cet
+usage** : la convention Symfony l'emporte, donc `MessageRepositoryInterface`. Un seul système de nommage
+dans le projet vaut mieux que deux qui se disputent la frontière, et un relecteur PHP y retrouvera ses
+repères immédiatement.
+
+Ces conventions sont vérifiées par PHP-CS-Fixer là où c'est automatisable ; le reste tient à la revue.
 
 ---
 

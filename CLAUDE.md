@@ -71,6 +71,19 @@ les bienvenus, aucune portabilité recherchée.
 
 Une seule base, pas de read model séparé, pas d'event sourcing.
 
+### Nommage (backend)
+
+**Conventions Symfony**, sans exception :
+<https://symfony.com/doc/current/contributing/code/standards.html#naming-conventions>
+
+Interfaces suffixées `Interface` (`MessageRepositoryInterface` — **pas** l'usage DDD sans
+suffixe), classes abstraites préfixées `Abstract`, traits suffixés `Trait`, exceptions
+suffixées `Exception`. Cas d'enum en `UpperCamelCase` (`ConversationType::Direct`).
+Constantes en `SCREAMING_SNAKE_CASE`. Noms de routes et paramètres de config en
+`snake_case`. PHPDoc : `bool`/`int`/`float`. Une classe par fichier.
+
+Le frontend suit les usages TypeScript/React, pas ceux de Symfony.
+
 ### Value objects
 
 Pas de primitive obsession. Les identifiants (`UserId`, `ConversationId`, `MessageId`) sont
