@@ -19,6 +19,16 @@ Conception : `docs/superpowers/specs/`. Concepts et raisonnements : vault Obsidi
 - **`Domain/` ne dépend de rien** — ni Symfony, ni Doctrine. Seule exception whitelistée :
   `symfony/uid`. `deptrac` échoue le build en cas de violation.
 
+## Infrastructure
+
+5 conteneurs : `caddy` (origine unique, `localhost:8080`) · `backend` (FrankenPHP) ·
+`frontend` (Vite) · `mercure` · `postgres`.
+
+Le hub Mercure reste un **service séparé** — c'est la leçon centrale du projet, on ne le
+fusionne pas dans FrankenPHP. Et le **worker mode de FrankenPHP est désactivé** : un process
+par requête, pour rester cohérent avec la prémisse shared-nothing qui justifie l'existence
+même du hub.
+
 ## Architecture
 
 Hexagonale par contexte borné, CQS, value objects systématiques.

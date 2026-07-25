@@ -47,7 +47,7 @@ Redis et MinIO sont **volontairement absents** : aucun usage en tranche 1 (prés
 | Service | Image / base | Rôle | Exposé |
 |---|---|---|---|
 | `caddy` | `caddy` | Reverse proxy, **seule origine publique** | `localhost:8080` |
-| `backend` | FrankenPHP (mode serveur PHP seul) | API métier | interne |
+| `backend` | FrankenPHP, **mode classique** (section 1.4) | API métier | interne |
 | `frontend` | `node` + Vite dev server | Client React | interne |
 | `mercure` | `dunglas/mercure` | Hub temps réel | interne |
 | `postgres` | `postgres:17` | Persistance | `5432` (confort outillage) |
@@ -98,6 +98,36 @@ instant-messaging/
 │   └── mercure/
 └── docs/superpowers/specs/
 ```
+
+### 1.4 Serveur PHP : FrankenPHP, sans worker mode
+
+[[Organisation du code (repo local)]] présente FrankenPHP comme « un service de moins à câbler », parce
+qu'il fusionne serveur PHP et hub Mercure. **Cette justification ne s'applique pas ici** : on a
+délibérément gardé le hub dans son propre conteneur (section 1). L'argument d'origine tombe, il faut
+donc en donner un autre — ou changer de serveur.
+
+**Justification retenue** : un conteneur backend **autonome**, un seul binaire, aucune configuration
+nginx. La paire `php-fpm` + `nginx` est du boilerplate que personne ne relit et où tout le monde
+copie-colle ; s'en passer est un gain réel, indépendant de Mercure.
+
+**Alternative écartée** : `php-fpm` nu, avec le Caddy de bord parlant FastCGI directement. Plus léger
+d'un hop HTTP et d'un serveur web, mais le proxy de bord devrait monter le `public/` du backend en
+volume partagé. Coupler le proxy au système de fichiers de l'application dégrade la lisibilité du
+`docker-compose` pour un gain marginal.
+
+> **Le worker mode est explicitement désactivé.**
+>
+> C'est pourtant l'argument principal de FrankenPHP : noyau Symfony persistant en mémoire, gain de
+> performance important. Deux raisons de le refuser ici :
+>
+> 1. **Cohérence du propos.** Tout le raisonnement de [[Stack - PHP + Mercure + JS]] part de « PHP est
+>    shared-nothing : requête → réponse → le process meurt », et c'est *de là* que découle la nécessité
+>    d'un hub séparé. Un backend en worker persistant rendrait la démonstration incohérente.
+> 2. **Risque sans contrepartie.** Le worker mode introduit les fuites d'état entre requêtes (services
+>    stateful, `static`), classe de bugs coûteuse à diagnostiquer, pour un bénéfice de performance nul
+>    à cette échelle.
+>
+> Un process par requête. Documenté comme un **choix**, pas comme une méconnaissance de l'outil.
 
 ### 1.5 Versionnement : un seul dépôt
 
