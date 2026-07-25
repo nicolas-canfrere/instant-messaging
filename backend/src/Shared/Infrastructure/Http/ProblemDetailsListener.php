@@ -18,6 +18,7 @@ use Symfony\Component\Messenger\Exception\HandlerFailedException;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 use Symfony\Component\Security\Core\Exception\AuthenticationException;
 use Symfony\Component\Security\Core\Exception\BadCredentialsException;
+use Symfony\Component\Serializer\NameConverter\NameConverterInterface;
 use Symfony\Component\Validator\Exception\ValidationFailedException;
 
 /**
@@ -30,6 +31,7 @@ final readonly class ProblemDetailsListener
     public function __construct(
         private CorrelationIdHolder $correlationIdHolder,
         private LoggerInterface $logger,
+        private NameConverterInterface $nameConverter,
     ) {
     }
 
@@ -174,7 +176,11 @@ final readonly class ProblemDetailsListener
 
         foreach ($exception->getViolations() as $violation) {
             $violations[] = [
-                'field' => $violation->getPropertyPath(),
+                // Le chemin remonte en camelCase, du nom de la propriete PHP.
+                // Le client parle snake_case et n'a pas a connaitre nos noms
+                // internes : on repasse par le meme convertisseur que celui du
+                // serialiseur, plutot que de redire la regle ici.
+                'field' => $this->nameConverter->normalize($violation->getPropertyPath()),
                 'message' => (string) $violation->getMessage(),
             ];
         }

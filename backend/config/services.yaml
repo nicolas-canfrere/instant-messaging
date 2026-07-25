@@ -60,6 +60,12 @@ services:
     App\Conversation\Application\Query\ConversationReaderInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationReader'
     App\Conversation\Application\MembershipCheckerInterface: '@App\Conversation\Infrastructure\Persistence\DbalMembershipChecker'
 
+    # Le meme convertisseur que celui du serialiseur, pour que les chemins de
+    # violation sortent en snake_case comme le reste de l'API.
+    App\Shared\Infrastructure\Http\ProblemDetailsListener:
+        arguments:
+            $nameConverter: '@serializer.name_converter.camel_case_to_snake_case'
+
     # Les identifiants de route arrivent typés dans les contrôleurs, et le voter
     # reçoit donc un ConversationId, pas une chaîne indistincte.
     App\Shared\Infrastructure\Http\UlidIdentifierValueResolver:

@@ -70,7 +70,7 @@ final class PayloadValidationTest extends DatabaseTestCase
             'POST',
             '/api/conversations',
             server: ['CONTENT_TYPE' => 'application/json'],
-            content: '{"type":"broadcast","member_ids":[]}',
+            content: '{"type":"broadcast","member_ids":["pas-un-ulid"]}',
         );
 
         $problem = $this->json();
@@ -82,6 +82,10 @@ final class PayloadValidationTest extends DatabaseTestCase
 
         self::assertNotEmpty($violations);
         self::assertSame('type', $violations[0]['field']);
+
+        // Le chemin sort en snake_case comme le reste de l'API : le client n'a
+        // pas a connaitre le nom de nos proprietes PHP.
+        self::assertSame('member_ids[0]', $violations[1]['field']);
     }
 
     public function testAddingMembersRejectsAMalformedPayload(): void
