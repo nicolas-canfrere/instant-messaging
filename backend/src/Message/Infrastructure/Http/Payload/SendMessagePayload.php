@@ -18,10 +18,16 @@ final readonly class SendMessagePayload
         )]
         public string $clientMessageId = '',
 
-        // La longueur est aussi verifiee par MessageContent : ici pour rendre
-        // une violation nommee, la, parce que c'est un invariant du domaine.
+        // Garde de taille sur l'entree BRUTE, qui rend une violation nommee.
+        // MessageContent revalide ensuite sur la chaine ROGNEE : c'est
+        // l'invariant du domaine, et il est le seul a faire foi. Cette
+        // contrainte-ci est donc legerement plus stricte, ce qui est le bon
+        // sens pour une garde de bordure.
         #[Assert\NotBlank(message: 'Un message ne peut pas etre vide.')]
-        #[Assert\Length(max: MessageContent::MAX_LENGTH)]
+        #[Assert\Length(
+            max: MessageContent::MAX_LENGTH,
+            maxMessage: 'Un message ne peut pas depasser {{ limit }} caracteres.',
+        )]
         public string $content = '',
     ) {
     }

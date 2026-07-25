@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Message\Infrastructure\Persistence;
 
+use App\Message\Domain\ClientMessageId;
 use App\Message\Domain\Message;
+use App\Message\Domain\MessageNotFoundException;
 use App\Message\Domain\MessageRepositoryInterface;
 use App\Shared\Application\Event\DomainEventCollectorInterface;
+use App\Shared\Domain\Identifier\UserId;
 use Doctrine\DBAL\Connection;
 
 final readonly class DbalMessageRepository implements MessageRepositoryInterface
@@ -41,10 +44,7 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
         );
 
         if (false === $inserted) {
-            return $this->ofClientKey(
-                $message->senderId()->toString(),
-                $message->clientMessageId()->toString(),
-            );
+            return $this->ofClientKey($message->senderId(), $message->clientMessageId());
         }
 
         // Message n'ecrit PAS dans conversations : le pointeur est mis a jour
@@ -54,9 +54,9 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
         return null;
     }
 
-    private function ofClientKey(string $senderId, string $clientMessageId): Message
+    private function ofClientKey(UserId $senderId, ClientMessageId $clientMessageId): Message
     {
-        /** @var array{id: string, conversation_id: string, sender_id: string, content: string, client_message_id: string, created_at: string} $row */
+        /** @var array{id: string, conversation_id: string, sender_id: string, content: string, client_message_id: string, created_at: string}|false $row */
         $row = $this->connection->fetchAssociative(
             <<<'SQL'
                 SELECT id, conversation_id, sender_id, content, client_message_id, created_at
@@ -64,8 +64,18 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
                 WHERE sender_id = :sender_id
                   AND client_message_id = :client_message_id
                 SQL,
-            ['sender_id' => $senderId, 'client_message_id' => $clientMessageId],
+            [
+                'sender_id' => $senderId->toString(),
+                'client_message_id' => $clientMessageId->toString(),
+            ],
         );
+
+        // L'INSERT vient d'entrer en conflit, donc la ligne existait a l'instant.
+        // Elle peut malgre tout avoir disparu entre les deux requetes : on le
+        // dit, plutot que de l'affirmer par une annotation a PHPStan.
+        if (false === $row) {
+            throw MessageNotFoundException::forClientKey($clientMessageId);
+        }
 
         return $this->mapper->fromRow($row);
     }

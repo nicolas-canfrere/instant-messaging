@@ -153,6 +153,50 @@ final class SendMessageTest extends DatabaseTestCase
         self::assertResponseStatusCodeSame(404);
     }
 
+    /**
+     * La cle d'idempotence est unique par EXPEDITEUR, pas par conversation.
+     * Sans garde-fou, ce second envoi rendrait 200 avec l'identifiant d'un
+     * message appartenant a l'autre fil — une reponse silencieusement fausse.
+     */
+    public function testReusingAClientKeyInAnotherConversationIsRejected(): void
+    {
+        $this->login('alice');
+
+        $this->send($this->conversationIdOfType('direct'), self::CLIENT_ID, 'bonjour');
+        self::assertResponseStatusCodeSame(201);
+
+        $this->send($this->conversationIdOfType('group'), self::CLIENT_ID, 'bonjour');
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('/problems/validation-failed', $this->json()['type']);
+    }
+
+    /**
+     * Le pointeur ne doit jamais reculer : ces mises a jour arrivent dans une
+     * seconde transaction, dont l'ordre est independant de celui des messages.
+     */
+    public function testTheConversationPreviewNeverGoesBackwards(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+
+        $this->send($conversationId, '01J9ZQ7X8K3M4N5P6Q7R8S9TAB', 'premier');
+        $this->send($conversationId, '01J9ZQ7X8K3M4N5P6Q7R8S9TAC', 'dernier');
+
+        // Rejeu du plus ancien : il ne doit pas ecraser l'apercu du plus recent.
+        $this->send($conversationId, '01J9ZQ7X8K3M4N5P6Q7R8S9TAB', 'premier');
+
+        foreach ($this->conversations() as $conversation) {
+            if ($conversation['id'] === $conversationId) {
+                self::assertSame('dernier', $conversation['last_message_preview']);
+
+                return;
+            }
+        }
+
+        self::fail('Conversation absente de la liste.');
+    }
+
     private function firstConversationId(): string
     {
         return $this->conversations()[0]['id'];

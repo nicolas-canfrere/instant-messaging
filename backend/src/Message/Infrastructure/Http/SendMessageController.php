@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace App\Message\Infrastructure\Http;
 
-use App\Conversation\Application\Contract\ConversationMembershipInterface;
 use App\Message\Application\Command\SendMessageCommand;
 use App\Message\Application\Query\FindMessageByClientKeyQuery;
 use App\Message\Domain\ClientMessageId;
-use App\Message\Domain\ConversationNotAccessibleException;
 use App\Message\Domain\MessageContent;
 use App\Message\Infrastructure\Http\Payload\SendMessagePayload;
 use App\Shared\Domain\Identifier\ConversationId;
@@ -29,7 +27,6 @@ final readonly class SendMessageController
         private CommandDispatcher $commands,
         private QueryDispatcher $queries,
         private IdGeneratorInterface $idGenerator,
-        private ConversationMembershipInterface $membership,
     ) {
     }
 
@@ -41,13 +38,9 @@ final readonly class SendMessageController
     ): JsonResponse {
         $senderId = $securityUser->userId();
 
-        // Message passe par le CONTRAT PUBLIE de Conversation, jamais par ses
-        // internes ni par sa table. 404 et non 403 : un 403 confirmerait
-        // l'existence de la conversation.
-        if (!$this->membership->isMember($conversationId, $senderId)) {
-            throw ConversationNotAccessibleException::withId($conversationId);
-        }
-
+        // L'appartenance est verifiee par le handler, DANS la transaction :
+        // la controler ici aussi laisserait croire que c'est cette
+        // verification-la qui protege, alors qu'elle serait devancable.
         $clientMessageId = ClientMessageId::fromString($payload->clientMessageId);
         $messageId = MessageId::fromString($this->idGenerator->generate());
 

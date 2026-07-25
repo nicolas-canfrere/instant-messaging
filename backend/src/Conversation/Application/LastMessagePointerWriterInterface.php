@@ -15,12 +15,11 @@ use App\Shared\Domain\Identifier\UserId;
  */
 interface LastMessagePointerWriterInterface
 {
-    /** @return bool false si la conversation n'existe pas */
     public function record(
         ConversationId $conversationId,
         MessageId $messageId,
         UserId $senderId,
         \DateTimeImmutable $sentAt,
         string $preview,
-    ): bool;
+    ): LastMessagePointerOutcome;
 }

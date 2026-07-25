@@ -58,7 +58,26 @@ final readonly class TransactionalMiddleware implements MiddlewareInterface
                 'event_class' => $event::class,
             ]);
 
-            $this->eventBus->dispatch($event);
+            // La transaction est deja commitee : l'ecriture a REUSSI. Laisser
+            // remonter l'echec d'une reaction transformerait ce succes en 500,
+            // et le client croirait devoir reessayer une operation deja faite.
+            //
+            // Chaque evenement est isole des autres : un hub injoignable ne doit
+            // pas empecher la mise a jour du pointeur de conversation.
+            //
+            // L'abonne qui echoue a deja loggue au niveau qui lui convient —
+            // `alert` pour le hub Mercure, par exemple. On ne re-loggue donc pas
+            // l'exception ici, on constate seulement que la reaction n'a pas eu
+            // lieu (« une erreur se loggue une seule fois »).
+            try {
+                $this->eventBus->dispatch($event);
+            } catch (\Throwable $throwable) {
+                $this->logger->error('Reaction a {event_class} en echec apres commit', [
+                    'event_class' => $event::class,
+                    'message_class' => $envelope->getMessage()::class,
+                    'exception' => $throwable,
+                ]);
+            }
         }
 
         return $result;
