@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Conversation\Domain;
 
 use App\Conversation\Domain\Conversation;
 use App\Conversation\Domain\NotAGroupException;
+use App\Shared\Domain\Event\MembershipChange;
 use App\Shared\Domain\Event\MembershipChanged;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
@@ -37,7 +38,7 @@ final class ConversationMembershipTest extends TestCase
         self::assertCount(1, $events);
         self::assertInstanceOf(MembershipChanged::class, $events[0]);
         self::assertSame(self::CAROL, $events[0]->userId->toString());
-        self::assertSame('joined', $events[0]->change);
+        self::assertSame(MembershipChange::Joined, $events[0]->change);
         self::assertTrue($group->hasMember(UserId::fromString(self::CAROL)));
     }
 
@@ -59,7 +60,7 @@ final class ConversationMembershipTest extends TestCase
 
         self::assertCount(1, $events);
         self::assertInstanceOf(MembershipChanged::class, $events[0]);
-        self::assertSame('left', $events[0]->change);
+        self::assertSame(MembershipChange::Left, $events[0]->change);
         self::assertFalse($group->hasMember(UserId::fromString(self::BOB)));
     }
 

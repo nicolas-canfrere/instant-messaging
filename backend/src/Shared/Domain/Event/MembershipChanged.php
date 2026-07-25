@@ -16,11 +16,10 @@ use App\Shared\Domain\Identifier\UserId;
  */
 final readonly class MembershipChanged implements DomainEventInterface
 {
-    /** @param 'joined'|'left' $change */
     public function __construct(
         public ConversationId $conversationId,
         public UserId $userId,
-        public string $change,
+        public MembershipChange $change,
     ) {
     }
 }

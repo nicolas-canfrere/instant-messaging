@@ -31,7 +31,7 @@ final readonly class PublishMembershipChangedListener implements DomainEventList
             'membership.changed',
             [
                 'conversation_id' => $event->conversationId->toString(),
-                'change' => $event->change,
+                'change' => $event->change->value,
             ],
             $this->idGenerator->generate(),
         );

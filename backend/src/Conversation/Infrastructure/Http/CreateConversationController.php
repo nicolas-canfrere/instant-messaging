@@ -7,6 +7,7 @@ namespace App\Conversation\Infrastructure\Http;
 use App\Conversation\Application\Command\CreateDirectConversationCommand;
 use App\Conversation\Application\Command\CreateGroupConversationCommand;
 use App\Conversation\Application\Query\FindDirectConversationQuery;
+use App\Conversation\Domain\ConversationType;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
 use App\Shared\Domain\IdGeneratorInterface;
@@ -39,10 +40,12 @@ final readonly class CreateConversationController
             $payload['member_ids'] ?? [],
         );
 
-        return match ($payload['type'] ?? null) {
-            'direct' => $this->openDirect($securityUser->userId(), $memberIds),
-            'group' => $this->createGroup($securityUser->userId(), $payload['title'] ?? '', $memberIds),
-            default => throw new UnsupportedConversationPayloadException(),
+        // `tryFrom` plutot qu'une comparaison de chaines : un type inconnu
+        // devient `null`, et le match n'a plus de cas par defaut a deviner.
+        return match (ConversationType::tryFrom($payload['type'] ?? '')) {
+            ConversationType::Direct => $this->openDirect($securityUser->userId(), $memberIds),
+            ConversationType::Group => $this->createGroup($securityUser->userId(), $payload['title'] ?? '', $memberIds),
+            null => throw new UnsupportedConversationPayloadException(),
         };
     }
 

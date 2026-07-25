@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Conversation\Domain;
 
+use App\Shared\Domain\Event\MembershipChange;
 use App\Shared\Domain\Event\MembershipChanged;
 use App\Shared\Domain\Event\RecordsEventsTrait;
 use App\Shared\Domain\Identifier\ConversationId;
@@ -164,7 +165,7 @@ final class Conversation
         }
 
         $this->members[] = new Member($userId, MemberRole::Member, $now);
-        $this->recordEvent(new MembershipChanged($this->id, $userId, 'joined'));
+        $this->recordEvent(new MembershipChanged($this->id, $userId, MembershipChange::Joined));
     }
 
     public function removeMember(UserId $userId): void
@@ -180,7 +181,7 @@ final class Conversation
             static fn(Member $member): bool => !$member->userId->equals($userId),
         ));
 
-        $this->recordEvent(new MembershipChanged($this->id, $userId, 'left'));
+        $this->recordEvent(new MembershipChanged($this->id, $userId, MembershipChange::Left));
     }
 
     /** Un direct a exactement deux participants, fixes pour toujours. */
