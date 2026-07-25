@@ -40,6 +40,7 @@ services:
     App\Shared\Application\Event\DomainEventCollectorInterface: '@App\Shared\Infrastructure\Event\InMemoryDomainEventCollector'
     App\Identity\Domain\UserRepositoryInterface: '@App\Identity\Infrastructure\Persistence\DbalUserRepository'
     App\Realtime\Domain\EventPublisherInterface: '@App\Realtime\Infrastructure\Mercure\MercureEventPublisher'
+    App\Conversation\Domain\ConversationRepositoryInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationRepository'
 
     # Contrat publie par Conversation, consomme par Realtime : le seul couplage
     # inter-contextes du projet, et il vise une surface publiee (cf. ADR 0001).

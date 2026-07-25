@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional;
 
+use Doctrine\DBAL\Connection;
+
 /** Verifie les garanties sur lesquelles reposeront tous les tests de persistance. */
 final class DatabaseIsolationTest extends DatabaseTestCase
 {
@@ -32,6 +34,24 @@ final class DatabaseIsolationTest extends DatabaseTestCase
         self::assertTrue(
             $this->connection->isTransactionActive(),
             'Le commit imbrique a ferme la transaction du test : verifier use_savepoints.',
+        );
+    }
+
+    /**
+     * KernelBrowser reconstruit le conteneur avant chaque requete par defaut.
+     * La requete HTTP obtiendrait alors une autre Connection que celle sur
+     * laquelle le test a ouvert sa transaction : ses ecritures seraient
+     * commitees pour de bon et fuiteraient dans les tests suivants.
+     * `disableReboot()` dans setUp() est ce qui l'empeche.
+     */
+    public function testAnHttpRequestSharesTheTestConnection(): void
+    {
+        $this->client->request('GET', '/api/ping');
+
+        self::assertSame(
+            $this->connection,
+            static::getContainer()->get(Connection::class),
+            'La requete HTTP n\'utilise pas la connexion du test : verifier disableReboot().',
         );
     }
 
