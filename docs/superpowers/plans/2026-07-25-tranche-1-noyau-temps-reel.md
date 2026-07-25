@@ -20,7 +20,7 @@ Ces contraintes s'appliquent à **chaque** tâche, sans rappel.
 - **Ni PHP ni Node sur l'hôte.** Toute commande passe par un conteneur. Les commandes de ce plan sont écrites en `docker compose` : elles fonctionnent quel que soit le contenu du `Makefile`. Si une cible `make` équivalente existe, la préférer — **lire le `Makefile` avant**, ne jamais inventer de cible.
 - **`Domain/` a zéro dépendance externe.** Aucun `use Symfony\…`, `Doctrine\…`, `Psr\…`. Aucune exception.
 - **Règle de dépendance :** `Infrastructure` → `Application` → `Domain`. Jamais l'inverse.
-- **Règle inter-contextes : aucun contexte n'en référence un autre, à aucune couche. Zéro dérogation deptrac.** Tout élément partagé remonte dans `Shared` : identifiants (`Shared/Domain/Identifier/`), domain events écoutés ailleurs (`Shared/Domain/Event/`), `SecurityUser` (`Shared/Infrastructure/Security/`). La charge utile d'un événement partagé n'utilise que des types de `Shared` et des scalaires — jamais un VO local.
+- **Règle inter-contextes ([ADR 0001](../../adr/0001-cross-context-communication.md))** : un contexte ne dépend que du **contrat publié** d'un autre — jamais de ses internes, ni de son code, **ni de ses tables**. Lectures : `{Ctx}/Application/Contract/` (possédé par le producteur, pas dans `Shared`). Écritures : **chorégraphie** par événements, jamais d'appel aux use cases d'un autre. Dans `Shared` : identifiants, événements inter-contextes, `SecurityUser`. Charge utile d'un événement partagé : types de `Shared` et scalaires uniquement.
 - **Nommage Symfony :** interfaces suffixées `Interface`, classes abstraites préfixées `Abstract`, exceptions suffixées `Exception`, cas d'enum en `UpperCamelCase`, constantes en `SCREAMING_SNAKE_CASE`, routes en `snake_case`.
 - **SQL littéral**, pas de `QueryBuilder`. Paramètres liés obligatoires. PostgreSQL assumé (`ON CONFLICT`, `RETURNING`).
 - **PHPStan niveau `max`.** Génériques annotés (`@return list<T>`), lignes DBAL typées (`array{…}`) dans les mappers. **Jamais de baseline ni de `@phpstan-ignore`.**
@@ -36,7 +36,8 @@ Ces contraintes s'appliquent à **chaque** tâche, sans rappel.
 | Tests fonctionnels backend | `docker compose exec backend vendor/bin/phpunit --testsuite=Functional` |
 | Un test précis | `docker compose exec backend vendor/bin/phpunit --filter=testNomDuTest` |
 | Analyse statique | `docker compose exec backend vendor/bin/phpstan analyse` |
-| Architecture | `docker compose exec backend vendor/bin/deptrac analyse` |
+| Architecture (couches) | `docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered` |
+| Architecture (contextes) | `docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered` |
 | Style | `docker compose exec backend vendor/bin/php-cs-fixer fix --dry-run --diff` |
 | Console Symfony | `docker compose exec backend bin/console <cmd>` |
 | Tests front | `docker compose exec frontend npx vitest run` |
@@ -411,7 +412,7 @@ git commit -m "chore(infra): 5 services docker et origine unique via Caddy"
 - Create: `backend/src/Shared/Domain/IdGeneratorInterface.php`, `backend/src/Shared/Infrastructure/Id/UlidGenerator.php`
 - Create: `backend/src/Shared/Domain/Exception/InvalidInputExceptionInterface.php`, `NotFoundExceptionInterface.php`
 - Create: `backend/tests/Unit/Shared/Domain/Identifier/UlidIdentifierTest.php`, `backend/tests/Support/FixedIdGenerator.php`
-- Create: `backend/deptrac.yaml`
+- Create: `backend/deptrac.yaml`, `backend/deptrac-contexts.yaml`
 
 **Interfaces:**
 - Produces:
@@ -736,80 +737,89 @@ Ajouter `App\Tests\` → `tests/` dans l'autoload-dev de `composer.json` si ce n
 
 - [ ] **Step 8: Écrire la configuration deptrac**
 
+**Deux fichiers, une dimension chacun** ([ADR 0001](../../adr/0001-cross-context-communication.md)).
+Deptrac n'accepte qu'un `ruleset` par fichier ; mélanger les deux dimensions imposerait le produit
+cartésien couche × contexte, soit une quinzaine de couches dès la tranche 1.
+
 ```yaml
-# backend/deptrac.yaml
+# backend/deptrac.yaml — dimension technique
 deptrac:
   paths:
     - ./src
   layers:
-    - name: SharedDomain
-      collectors:
-        - type: directory
-          value: src/Shared/Domain/.*
-    - name: SharedApplication
-      collectors:
-        - type: directory
-          value: src/Shared/Application/.*
-    - name: SharedInfrastructure
-      collectors:
-        - type: directory
-          value: src/Shared/Infrastructure/.*
-    - name: IdentityDomain
-      collectors: [{ type: directory, value: src/Identity/Domain/.* }]
-    - name: IdentityApplication
-      collectors: [{ type: directory, value: src/Identity/Application/.* }]
-    - name: IdentityInfrastructure
-      collectors: [{ type: directory, value: src/Identity/Infrastructure/.* }]
-    - name: ConversationDomain
-      collectors: [{ type: directory, value: src/Conversation/Domain/.* }]
-    - name: ConversationApplication
-      collectors: [{ type: directory, value: src/Conversation/Application/.* }]
-    - name: ConversationInfrastructure
-      collectors: [{ type: directory, value: src/Conversation/Infrastructure/.* }]
-    - name: MessageDomain
-      collectors: [{ type: directory, value: src/Message/Domain/.* }]
-    - name: MessageApplication
-      collectors: [{ type: directory, value: src/Message/Application/.* }]
-    - name: MessageInfrastructure
-      collectors: [{ type: directory, value: src/Message/Infrastructure/.* }]
-    - name: RealtimeDomain
-      collectors: [{ type: directory, value: src/Realtime/Domain/.* }]
-    - name: RealtimeApplication
-      collectors: [{ type: directory, value: src/Realtime/Application/.* }]
-    - name: RealtimeInfrastructure
-      collectors: [{ type: directory, value: src/Realtime/Infrastructure/.* }]
+    - name: Domain
+      collectors: [{ type: directory, value: 'src/[^/]+/Domain/.*' }]
+    - name: Application
+      collectors: [{ type: directory, value: 'src/[^/]+/Application/.*' }]
+    - name: Infrastructure
+      collectors: [{ type: directory, value: 'src/[^/]+/Infrastructure/.*' }]
     - name: Vendor
       collectors:
         - type: classNameRegex
           value: '#^(Symfony|Doctrine|Psr|Monolog|Lcobucci)\\.*#'
 
   ruleset:
-    # Regle centrale : aucun Domain ne depend de quoi que ce soit hors de lui-meme.
-    SharedDomain: ~
-    IdentityDomain: [SharedDomain]
-    ConversationDomain: [SharedDomain]
-    MessageDomain: [SharedDomain]
-    RealtimeDomain: [SharedDomain]
-
-    SharedApplication: [SharedDomain, Vendor]
-    IdentityApplication: [IdentityDomain, SharedDomain, SharedApplication, Vendor]
-    ConversationApplication: [ConversationDomain, SharedDomain, SharedApplication, Vendor]
-    MessageApplication: [MessageDomain, SharedDomain, SharedApplication, Vendor]
-    RealtimeApplication: [RealtimeDomain, SharedDomain, SharedApplication, Vendor]
-
-    SharedInfrastructure: [SharedDomain, SharedApplication, Vendor]
-    IdentityInfrastructure: [IdentityDomain, IdentityApplication, SharedDomain, SharedApplication, SharedInfrastructure, Vendor]
-    ConversationInfrastructure: [ConversationDomain, ConversationApplication, SharedDomain, SharedApplication, SharedInfrastructure, Vendor]
-    MessageInfrastructure: [MessageDomain, MessageApplication, SharedDomain, SharedApplication, SharedInfrastructure, Vendor]
-    RealtimeInfrastructure: [RealtimeDomain, RealtimeApplication, SharedDomain, SharedApplication, SharedInfrastructure, Vendor]
+    # LA regle du projet : le domaine ne depend de rien. Pas meme symfony/uid.
+    Domain: ~
+    Application: [Domain, Vendor]
+    Infrastructure: [Domain, Application, Vendor]
 ```
 
-`SharedDomain: ~` est la ligne qui porte la contrainte principale : **aucune dépendance autorisée**, `symfony/uid` compris.
+```yaml
+# backend/deptrac-contexts.yaml — dimension contexte
+deptrac:
+  paths:
+    - ./src
+  layers:
+    - name: Shared
+      collectors: [{ type: directory, value: src/Shared/.* }]
+
+    # La surface publiee de Conversation est une couche distincte du contexte
+    # lui-meme : c'est la seule chose que les autres ont le droit de voir.
+    - name: ConversationContract
+      collectors: [{ type: directory, value: src/Conversation/Application/Contract/.* }]
+
+    - name: Conversation
+      collectors:
+        - type: bool
+          must:
+            - { type: directory, value: src/Conversation/.* }
+          must_not:
+            - { type: directory, value: src/Conversation/Application/Contract/.* }
+
+    - name: Identity
+      collectors: [{ type: directory, value: src/Identity/.* }]
+    - name: Message
+      collectors: [{ type: directory, value: src/Message/.* }]
+    - name: Realtime
+      collectors: [{ type: directory, value: src/Realtime/.* }]
+
+  ruleset:
+    Shared: ~
+    ConversationContract: ~          # un contrat ne depend de rien
+
+    Identity: [Shared]
+    Conversation: [Shared]
+    Message: [Shared]
+
+    # Allowlist explicite : ajouter un couplage inter-contextes demande de
+    # modifier cette ligne. La friction est voulue.
+    Realtime: [Shared, ConversationContract]
+```
+
+Les deux lignes qui portent tout : **`Domain: ~`** (le domaine ne dépend de rien, `symfony/uid`
+compris) et **`Realtime: [Shared, ConversationContract]`** (la seule dépendance inter-contextes du
+projet, et elle vise une surface publiée, pas des internes).
+
+> Note pour l'implémentation : les paires `Shared`/`Vendor` sans dépendances déclarées peuvent faire
+> remonter des « uncovered dependencies ». Lancer les deux analyses avec `--fail-on-uncovered` dès
+> cette tâche, pour que le fichier soit complet **avant** qu'il y ait du code à corriger.
 
 - [ ] **Step 9: Vérifier deptrac, PHPStan et les tests**
 
 ```bash
-docker compose exec backend vendor/bin/deptrac analyse
+docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered
+docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 docker compose exec backend vendor/bin/phpstan analyse
 docker compose exec backend vendor/bin/phpunit
 ```
@@ -820,7 +830,7 @@ Attendu : zéro violation, zéro erreur, tous les tests verts. Si PHPStan se pla
 
 ```bash
 git checkout -b feat/socle-identifiants
-git add backend/src/Shared backend/tests backend/deptrac.yaml backend/composer.json
+git add backend/src/Shared backend/tests backend/deptrac.yaml backend/deptrac-contexts.yaml backend/composer.json
 git commit -m "feat(shared): identifiants ULID, port de generation et regles deptrac"
 ```
 
@@ -1204,7 +1214,8 @@ Le `detail` du 422 reprend le message de l'exception de domaine : ces messages s
 
 ```bash
 docker compose exec backend vendor/bin/phpunit
-docker compose exec backend vendor/bin/deptrac analyse
+docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered
+docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 docker compose exec backend vendor/bin/phpstan analyse
 ```
 
@@ -1622,7 +1633,8 @@ services:
 
 ```bash
 docker compose exec backend vendor/bin/phpunit
-docker compose exec backend vendor/bin/deptrac analyse
+docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered
+docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 docker compose exec backend vendor/bin/phpstan analyse
 ```
 
@@ -1699,6 +1711,8 @@ final class Version20260725000000 extends AbstractMigration
                 direct_key CHAR(53) DEFAULT NULL UNIQUE,
                 last_message_id CHAR(26) DEFAULT NULL,
                 last_message_at TIMESTAMPTZ DEFAULT NULL,
+                last_message_preview VARCHAR(80) DEFAULT NULL,
+                last_message_sender_id CHAR(26) DEFAULT NULL,
                 created_at TIMESTAMPTZ NOT NULL,
                 CONSTRAINT conversations_type_check CHECK (type IN ('direct', 'group')),
                 CONSTRAINT conversations_direct_needs_key CHECK (
@@ -2514,7 +2528,8 @@ final readonly class ListUsersController
 
 ```bash
 docker compose exec backend vendor/bin/phpunit
-docker compose exec backend vendor/bin/deptrac analyse
+docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered
+docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 docker compose exec backend vendor/bin/phpstan analyse
 ```
 
@@ -2533,6 +2548,7 @@ git commit -m "feat(identity): authentification locale, /api/me et annuaire"
 **Files:**
 - Create: `backend/src/Realtime/Domain/Topic.php`, `EventPublisherInterface.php`
 - Create: `backend/src/Realtime/Infrastructure/Mercure/MercureEventPublisher.php`, `MercureCookieFactory.php`, `SubscribeTopicsProvider.php`
+- Create: `backend/src/Conversation/Application/Contract/MemberConversationsFinderInterface.php`, `backend/src/Conversation/Infrastructure/Contract/DbalMemberConversationsFinder.php` (contrat publié, consommé ici)
 - Create: `backend/src/Realtime/Infrastructure/Http/RealtimeTokenController.php`
 - Create: `backend/tests/Unit/Realtime/Domain/TopicTest.php`, `backend/tests/Support/InMemoryEventPublisher.php`
 - Create: `backend/tests/Functional/Realtime/RealtimeTokenTest.php`
@@ -2782,31 +2798,48 @@ final readonly class MercureEventPublisher implements EventPublisherInterface
 
 - [ ] **Step 6: Écrire le fournisseur de topics et la fabrique de cookie**
 
+**Trois classes, parce que c'est le seul couplage inter-contextes du projet** et qu'il passe par un
+contrat publié ([ADR 0001](../../adr/0001-cross-context-communication.md)) : `Realtime` ne lit **pas**
+la table `conversation_members`, qui appartient à `Conversation`.
+
 ```php
 <?php
-// backend/src/Realtime/Infrastructure/Mercure/SubscribeTopicsProvider.php
+// backend/src/Conversation/Application/Contract/MemberConversationsFinderInterface.php
+// Surface PUBLIEE de Conversation. Possedee par le producteur, pas par Shared.
 declare(strict_types=1);
 
-namespace App\Realtime\Infrastructure\Mercure;
+namespace App\Conversation\Application\Contract;
 
-use App\Realtime\Domain\Topic;
+use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\UserId;
+
+interface MemberConversationsFinderInterface
+{
+    /** @return list<ConversationId> les conversations dont l'utilisateur est membre */
+    public function conversationIdsFor(UserId $userId): array;
+}
+```
+
+```php
+<?php
+// backend/src/Conversation/Infrastructure/Contract/DbalMemberConversationsFinder.php
+declare(strict_types=1);
+
+namespace App\Conversation\Infrastructure\Contract;
+
+use App\Conversation\Application\Contract\MemberConversationsFinderInterface;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
 use Doctrine\DBAL\Connection;
 
-/**
- * Liste des topics qu'un utilisateur a le droit d'ecouter. C'est un modele de
- * lecture : il interroge directement les appartenances, comme le fait le
- * ConversationVoter, pour que les deux ne puissent pas diverger.
- */
-final readonly class SubscribeTopicsProvider
+/** Conversation est le SEUL a lire conversation_members. */
+final readonly class DbalMemberConversationsFinder implements MemberConversationsFinderInterface
 {
     public function __construct(private Connection $connection)
     {
     }
 
-    /** @return list<string> */
-    public function forUser(UserId $userId): array
+    public function conversationIdsFor(UserId $userId): array
     {
         /** @var list<array{conversation_id: string}> $rows */
         $rows = $this->connection->fetchAllAssociative(
@@ -2814,11 +2847,44 @@ final readonly class SubscribeTopicsProvider
             ['user_id' => $userId->toString()],
         );
 
-        $topics = array_map(
-            static fn (array $row): string => Topic::conversation(
-                ConversationId::fromString($row['conversation_id']),
-            )->toString(),
+        return array_map(
+            static fn (array $row): ConversationId => ConversationId::fromString($row['conversation_id']),
             $rows,
+        );
+    }
+}
+```
+
+```php
+<?php
+// backend/src/Realtime/Infrastructure/Mercure/SubscribeTopicsProvider.php
+declare(strict_types=1);
+
+namespace App\Realtime\Infrastructure\Mercure;
+
+use App\Conversation\Application\Contract\MemberConversationsFinderInterface;
+use App\Realtime\Domain\Topic;
+use App\Shared\Domain\Identifier\UserId;
+
+/**
+ * Liste des topics qu'un utilisateur a le droit d'ecouter.
+ *
+ * Consomme le contrat publie par Conversation : si la structure de
+ * conversation_members change, c'est le contrat qui casse — de facon typee et
+ * visible — au lieu d'un SELECT silencieusement faux.
+ */
+final readonly class SubscribeTopicsProvider
+{
+    public function __construct(private MemberConversationsFinderInterface $conversations)
+    {
+    }
+
+    /** @return list<string> */
+    public function forUser(UserId $userId): array
+    {
+        $topics = array_map(
+            static fn ($conversationId): string => Topic::conversation($conversationId)->toString(),
+            $this->conversations->conversationIdsFor($userId),
         );
 
         // Toujours present, ne change jamais : c'est par lui qu'on apprend
@@ -2997,7 +3063,8 @@ services:
 
 ```bash
 docker compose exec backend vendor/bin/phpunit
-docker compose exec backend vendor/bin/deptrac analyse
+docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered
+docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 docker compose exec backend vendor/bin/phpstan analyse
 ```
 
@@ -3018,6 +3085,7 @@ git commit -m "feat(realtime): VO Topic, publication Mercure et cookie JWT"
 - Create: `backend/src/Conversation/Application/Command/CreateDirectConversation.php`, `CreateDirectConversationHandler.php`
 - Create: `backend/src/Conversation/Application/Query/ListMyConversations.php`, `ListMyConversationsHandler.php`, `ConversationView.php`
 - Create: `backend/src/Conversation/Infrastructure/Persistence/DbalConversationRepository.php`, `ConversationMapper.php`, `DirectKeyHydrator.php`, `SqlMyConversationsQuery.php`
+- Create (tâche 7, rappel) : `Conversation/Application/Contract/MemberConversationsFinderInterface.php` et son implémentation — première tranche du contexte, réduite à sa surface publiée
 - Create: `backend/src/Conversation/Infrastructure/Http/UnsupportedConversationPayloadException.php`
 - Create: `backend/src/Conversation/Infrastructure/Http/CreateConversationController.php`, `ListConversationsController.php`
 - Create: `backend/src/Shared/Infrastructure/Bus/CommandDispatcher.php`, `QueryDispatcher.php`
@@ -3778,17 +3846,19 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 #[AsMessageHandler(bus: 'query.bus')]
 final readonly class SqlMyConversationsQuery
 {
+    // Aucune jointure vers messages : l'apercu est denormalise sur la conversation,
+    // ecrit par le listener qui reagit a MessageWasSent (ADR 0001). Conversation
+    // ne lit donc jamais la table d'un autre contexte.
     private const string SQL = <<<'SQL'
         SELECT c.id,
                c.type,
                c.title,
                c.last_message_at,
-               m.content AS last_message_content,
-               m.sender_id AS last_message_sender_id
+               c.last_message_preview,
+               c.last_message_sender_id
         FROM conversations c
         INNER JOIN conversation_members cm
                 ON cm.conversation_id = c.id AND cm.user_id = :user_id
-        LEFT JOIN messages m ON m.id = c.last_message_id
         ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
         SQL;
 
@@ -3799,7 +3869,7 @@ final readonly class SqlMyConversationsQuery
     /** @return list<ConversationView> */
     public function __invoke(ListMyConversations $query): array
     {
-        /** @var list<array{id: string, type: string, title: string|null, last_message_at: string|null, last_message_content: string|null, last_message_sender_id: string|null}> $rows */
+        /** @var list<array{id: string, type: string, title: string|null, last_message_at: string|null, last_message_preview: string|null, last_message_sender_id: string|null}> $rows */
         $rows = $this->connection->fetchAllAssociative(self::SQL, ['user_id' => $query->userId->toString()]);
 
         return array_map(
@@ -3808,9 +3878,7 @@ final readonly class SqlMyConversationsQuery
                 $row['type'],
                 $row['title'],
                 $row['last_message_at'],
-                null === $row['last_message_content']
-                    ? null
-                    : mb_substr($row['last_message_content'], 0, 80),
+                $row['last_message_preview'],
                 $row['last_message_sender_id'],
             ),
             $rows,
@@ -4010,7 +4078,8 @@ final class CreateDirectConversationTest extends AuthenticationTest
 
 ```bash
 docker compose exec backend vendor/bin/phpunit
-docker compose exec backend vendor/bin/deptrac analyse
+docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered
+docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 docker compose exec backend vendor/bin/phpstan analyse
 ```
 
@@ -4682,7 +4751,8 @@ Le troisième test est celui qui verrouille la décision de sécurité : les deu
 
 ```bash
 docker compose exec backend vendor/bin/phpunit
-docker compose exec backend vendor/bin/deptrac analyse
+docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered
+docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 docker compose exec backend vendor/bin/phpstan analyse
 ```
 
@@ -4704,6 +4774,7 @@ git commit -m "feat(conversation): groupes, gestion des membres et autorisation"
 - Create: `backend/src/Message/Infrastructure/Persistence/DbalMessageRepository.php`, `MessageMapper.php`
 - Create: `backend/src/Message/Infrastructure/Http/SendMessageController.php`
 - Create: `backend/src/Realtime/Application/EventListener/PublishMessageWasSent.php`
+- Create: `backend/src/Conversation/Application/EventListener/RecordLastMessageOnMessageWasSent.php`, `Command/RecordLastMessage.php` + handler
 - Create: `backend/tests/Unit/Message/Domain/MessageContentTest.php`, `backend/tests/Functional/Message/SendMessageTest.php`
 
 **Interfaces:**
@@ -5101,12 +5172,6 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
         RETURNING id
         SQL;
 
-    private const string POINTER_SQL = <<<'SQL'
-        UPDATE conversations
-        SET last_message_id = :message_id, last_message_at = :created_at
-        WHERE id = :conversation_id
-        SQL;
-
     public function __construct(
         private Connection $connection,
         private MessageMapper $mapper,
@@ -5132,13 +5197,8 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
             );
         }
 
-        // Meme transaction que l'insert : le pointeur ne peut pas etre faux (spec 3.6).
-        $this->connection->executeStatement(self::POINTER_SQL, [
-            'message_id' => $message->id()->toString(),
-            'created_at' => $message->createdAt()->format(\DateTimeInterface::ATOM),
-            'conversation_id' => $message->conversationId()->toString(),
-        ]);
-
+        // Message n'ecrit PAS dans conversations (ADR 0001) : le pointeur est mis
+        // a jour par Conversation, qui ecoute MessageWasSent.
         $this->collector->collect(...$message->releaseEvents());
 
         return null;
@@ -5274,6 +5334,59 @@ final readonly class PublishMessageWasSent
 
 `MessageWasSent` étant dans `Shared/Domain/Event/`, **aucune règle deptrac n'est à modifier**.
 
+- [ ] **Step 6 bis: Écrire le listener `Conversation` qui met à jour son propre pointeur**
+
+C'est l'autre moitié de la chorégraphie : `Conversation` réagit au fait publié par `Message` et met à
+jour **sa** table. `Message` n'y touche jamais.
+
+```php
+<?php
+// backend/src/Conversation/Application/EventListener/RecordLastMessageOnMessageWasSent.php
+declare(strict_types=1);
+
+namespace App\Conversation\Application\EventListener;
+
+use App\Conversation\Application\Command\RecordLastMessage;
+use App\Shared\Domain\Event\MessageWasSent;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+use Symfony\Component\Messenger\MessageBusInterface;
+
+#[AsMessageHandler(bus: 'event.bus')]
+final readonly class RecordLastMessageOnMessageWasSent
+{
+    private const int PREVIEW_LENGTH = 80;
+
+    public function __construct(private MessageBusInterface $commandBus)
+    {
+    }
+
+    public function __invoke(MessageWasSent $event): void
+    {
+        // Conversation reagit avec SA propre commande : un contexte ne pilote
+        // jamais les use cases d'un autre, et n'est pilote par personne.
+        $this->commandBus->dispatch(new RecordLastMessage(
+            $event->conversationId,
+            $event->messageId,
+            $event->senderId,
+            $event->createdAt,
+            mb_substr($event->content, 0, self::PREVIEW_LENGTH),
+        ));
+    }
+}
+```
+
+`RecordLastMessageHandler` exécute un seul `UPDATE` sur `conversations`
+(`last_message_id`, `last_message_at`, `last_message_sender_id`, `last_message_preview`), et loggue en
+`error` si la conversation est introuvable — cas anormal, mais non bloquant pour le message déjà
+persisté.
+
+Le test fonctionnel correspondant : après un envoi, `GET /api/conversations` renvoie l'aperçu du
+message qui vient d'être envoyé.
+
+> **Mode d'échec assumé** : si cette seconde transaction échoue, l'aperçu reste périmé jusqu'au
+> message suivant, qui le corrige. Jamais de message perdu. C'est le prix de la chorégraphie, et il
+> est documenté dans l'ADR 0001.
+
 - [ ] **Step 7: Écrire le test fonctionnel de l'idempotence**
 
 ```php
@@ -5392,7 +5505,8 @@ final class SendMessageTest extends CreateDirectConversationTest
 
 ```bash
 docker compose exec backend vendor/bin/phpunit
-docker compose exec backend vendor/bin/deptrac analyse
+docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered
+docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 docker compose exec backend vendor/bin/phpstan analyse
 ```
 
@@ -5708,7 +5822,8 @@ final readonly class SqlMessagePageQuery
 
 ```bash
 docker compose exec backend vendor/bin/phpunit
-docker compose exec backend vendor/bin/deptrac analyse
+docker compose exec backend vendor/bin/deptrac analyse --fail-on-uncovered
+docker compose exec backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 docker compose exec backend vendor/bin/phpstan analyse
 ```
 
@@ -7138,7 +7253,9 @@ jobs:
         run: docker compose exec -T backend vendor/bin/phpunit
 
       - name: Architecture
-        run: docker compose exec -T backend vendor/bin/deptrac analyse --fail-on-uncovered
+        run: |
+          docker compose exec -T backend vendor/bin/deptrac analyse --fail-on-uncovered
+          docker compose exec -T backend vendor/bin/deptrac analyse -c deptrac-contexts.yaml --fail-on-uncovered
 
       - name: Analyse statique
         run: docker compose exec -T backend vendor/bin/phpstan analyse --no-progress
