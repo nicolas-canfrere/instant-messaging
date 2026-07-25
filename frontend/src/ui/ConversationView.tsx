@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ConversationSummary, UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
+import type { ReceiptsState } from '../store/receiptsReducer';
 import type { TypingState } from '../store/typingReducer';
 import { Composer } from './Composer';
 import { conversationTitle } from './labels';
@@ -15,6 +16,7 @@ type Props = {
   peers: Record<string, string>;
   meId: string;
   typingState: TypingState;
+  receiptsState: ReceiptsState;
   onLoadOlder: () => void;
   onSend: (content: string) => Promise<void>;
   onTyping: () => void;
@@ -27,6 +29,7 @@ export function ConversationView({
   peers,
   meId,
   typingState,
+  receiptsState,
   onLoadOlder,
   onSend,
   onTyping,
@@ -77,6 +80,9 @@ export function ConversationView({
           thread={thread}
           users={users}
           meId={meId}
+          conversationId={conversation.id}
+          receiptsState={receiptsState}
+          isGroup={conversation.type === 'group'}
           onLoadOlder={onLoadOlder}
         />
 

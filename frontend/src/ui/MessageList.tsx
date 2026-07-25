@@ -1,7 +1,13 @@
 import { useLayoutEffect, useRef, type UIEvent } from 'react';
 import type { UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
+import {
+  selectReadCount,
+  selectStatusFor,
+  type ReceiptsState,
+} from '../store/receiptsReducer';
 import { formatTime, userName } from './labels';
+import { ReceiptTicks } from './ReceiptTicks';
 import { useScrollAnchor } from './useScrollAnchor';
 
 /** Distance au haut du conteneur en dessous de laquelle on charge la page precedente. */
@@ -14,6 +20,10 @@ type Props = {
   thread: Thread;
   users: Record<string, UserSummary>;
   meId: string;
+  conversationId: string;
+  receiptsState: ReceiptsState;
+  /** En groupe seulement, on affiche « lu par N » : en direct, la coche bleue suffit. */
+  isGroup: boolean;
   onLoadOlder: () => void;
 };
 
@@ -23,7 +33,15 @@ type Props = {
  * a zero la hauteur memorisee par `useScrollAnchor` — sinon la hauteur d'un
  * fil servirait d'ancre a un autre et le scroll sauterait au changement.
  */
-export function MessageList({ thread, users, meId, onLoadOlder }: Props) {
+export function MessageList({
+  thread,
+  users,
+  meId,
+  conversationId,
+  receiptsState,
+  isGroup,
+  onLoadOlder,
+}: Props) {
   const container = useRef<HTMLDivElement | null>(null);
   /** L'utilisateur suivait-il le bas du fil juste avant ce rendu ? En ref : ne doit pas re-rendre. */
   const atBottom = useRef(true);
@@ -91,6 +109,22 @@ export function MessageList({ thread, users, meId, onLoadOlder }: Props) {
               {userName(users, message.senderId)} · {formatTime(message.createdAt)}
             </p>
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
+
+            {/*
+              Uniquement sur SES propres messages acquittes : un message encore
+              optimiste n'a pas d'`id` serveur, donc aucun watermark ne peut le
+              designer, et le statut d'un message recu n'a pas de sens ici.
+            */}
+            {message.senderId === meId && message.id !== null && (
+              <ReceiptTicks
+                status={selectStatusFor(receiptsState, conversationId, message.id, meId)}
+                readCount={
+                  isGroup
+                    ? selectReadCount(receiptsState, conversationId, message.id, meId)
+                    : undefined
+                }
+              />
+            )}
 
             {message.status === 'pending' && <p className="text-xs opacity-60">envoi…</p>}
             {message.status === 'failed' && (

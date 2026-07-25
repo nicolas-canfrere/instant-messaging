@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { ConversationSummary, UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
+import { emptyReceiptsState } from '../store/receiptsReducer';
 import { emptyTypingState } from '../store/typingReducer';
 import { ConversationView } from './ConversationView';
 
@@ -61,6 +62,7 @@ describe('ConversationView', () => {
       // Personne n'ecrit : l'indicateur ne rend rien et ne perturbe pas le
       // comptage des `<ul>` plus bas.
       typingState: emptyTypingState(),
+      receiptsState: emptyReceiptsState(),
       onLoadOlder: vi.fn(),
       onSend: vi.fn(async () => {}),
       onTyping: vi.fn(),

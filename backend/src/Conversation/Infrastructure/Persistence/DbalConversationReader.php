@@ -80,10 +80,10 @@ final readonly class DbalConversationReader implements ConversationReaderInterfa
             return null;
         }
 
-        /** @var list<array{user_id: string, role: string}> $members */
+        /** @var list<array{user_id: string, role: string, last_delivered_message_id: string|null, last_read_message_id: string|null}> $members */
         $members = $this->connection->fetchAllAssociative(
             <<<'SQL'
-                SELECT user_id, role
+                SELECT user_id, role, last_delivered_message_id, last_read_message_id
                 FROM conversation_members
                 WHERE conversation_id = :conversation_id
                 ORDER BY joined_at ASC

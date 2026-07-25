@@ -84,6 +84,15 @@ export const api = {
 
   typing: (conversationId: string) =>
     request<void>(`/api/conversations/${conversationId}/typing`, { method: 'POST' }),
+
+  receipts: (conversationId: string, watermarks: { deliveredUpTo?: string; readUpTo?: string }) =>
+    request<void>(`/api/conversations/${conversationId}/receipts`, {
+      method: 'POST',
+      body: JSON.stringify({
+        delivered_up_to: watermarks.deliveredUpTo,
+        read_up_to: watermarks.readUpTo,
+      }),
+    }),
 };
 
 export type { ApiMessage };

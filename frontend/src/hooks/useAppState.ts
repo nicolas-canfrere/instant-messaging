@@ -13,6 +13,12 @@ import {
   type StoredMessage,
 } from '../store/messagesReducer';
 import { emptyPresenceState, presenceReducer } from '../store/presenceReducer';
+import {
+  emptyReceiptsState,
+  receiptsReducer,
+  type ReceiptsState,
+} from '../store/receiptsReducer';
+import { useReadWatermark } from './useReadWatermark';
 import { emptyTypingState, typingReducer, type TypingState } from '../store/typingReducer';
 import { useHeartbeat } from './useHeartbeat';
 import { useTyping } from './useTyping';
@@ -41,7 +47,12 @@ function fromApiMessage(message: ApiMessage): StoredMessage {
  * declenche QUE pour les evenements sans nom. Sans ces ecoutes explicites, le
  * front resterait muet alors que le hub diffuse correctement.
  */
-const NAMED_EVENTS = ['message.created', 'membership.changed', 'typing.started'];
+const NAMED_EVENTS = [
+  'message.created',
+  'membership.changed',
+  'typing.started',
+  'receipt.updated',
+];
 
 /**
  * Adaptateur entre l'EventSource du navigateur et le port minimal attendu par
@@ -80,6 +91,13 @@ function readString(payload: Record<string, unknown>, key: string): string {
   const value = payload[key];
 
   return typeof value === 'string' ? value : '';
+}
+
+/** Comme `readString`, mais un champ absent ou nul reste `null` — un curseur jamais atteint. */
+function readNullableString(payload: Record<string, unknown>, key: string): string | null {
+  const value = payload[key];
+
+  return typeof value === 'string' ? value : null;
 }
 
 /**
@@ -157,6 +175,7 @@ export type AppState = {
   messagesState: MessagesState;
   onlineUserIds: Set<string>;
   typingState: TypingState;
+  receiptsState: ReceiptsState;
   notifyTyping: (conversationId: string) => void;
   selectConversation: (conversationId: string) => void;
   loadOlder: () => void;
@@ -178,6 +197,11 @@ export function useAppState(me: Me): AppState {
     emptyPresenceState,
   );
   const [typingState, dispatchTyping] = useReducer(typingReducer, undefined, emptyTypingState);
+  const [receiptsState, dispatchReceipts] = useReducer(
+    receiptsReducer,
+    undefined,
+    emptyReceiptsState,
+  );
   const notifyTyping = useTyping();
 
   const clientRef = useRef<RealtimeClient | null>(null);
@@ -443,6 +467,33 @@ export function useAppState(me: Me): AppState {
             userId: readString(event.payload, 'sender_id'),
           });
 
+          // L'ACK « distribue » se declenche a la RECEPTION SSE, pour TOUTE
+          // conversation — y compris celles qu'on n'a pas ouvertes. C'est
+          // pourquoi il vit ici, au niveau du client temps reel global, et non
+          // dans ConversationView : la vue ne verrait que le fil affiche, et
+          // marquerait donc « distribue » une seule conversation sur N.
+          const incomingId = readString(event.payload, 'id');
+          const incomingConversationId = readString(event.payload, 'conversation_id');
+
+          if (readString(event.payload, 'sender_id') !== me.id && incomingId !== '') {
+            void api.receipts(incomingConversationId, { deliveredUpTo: incomingId }).catch(() => {
+              // Un ACK perdu se rattrape au message suivant : le curseur est
+              // monotone, donc un seul ACK reussi rattrape tous les manques.
+            });
+          }
+
+          return;
+        }
+
+        if (event.type === 'receipt.updated') {
+          dispatchReceipts({
+            type: 'receipt/updated',
+            conversationId: readString(event.payload, 'conversation_id'),
+            userId: readString(event.payload, 'user_id'),
+            lastDeliveredMessageId: readNullableString(event.payload, 'last_delivered_message_id'),
+            lastReadMessageId: readNullableString(event.payload, 'last_read_message_id'),
+          });
+
           return;
         }
 
@@ -501,6 +552,17 @@ export function useAppState(me: Me): AppState {
 
   useHeartbeat(onOnlineUserIds);
 
+  // Dernier message SERVEUR du fil ouvert : un envoi optimiste n'a pas encore
+  // d'id, et un curseur ne peut pas designer un message que le serveur ignore.
+  const lastServerMessageId =
+    selectedId === null
+      ? null
+      : (selectThread(messagesState, selectedId)
+          .items.filter((item) => item.id !== null)
+          .at(-1)?.id ?? null);
+
+  useReadWatermark(selectedId, lastServerMessageId);
+
   return {
     me,
     users,
@@ -510,6 +572,7 @@ export function useAppState(me: Me): AppState {
     messagesState,
     onlineUserIds: presenceState.onlineUserIds,
     typingState,
+    receiptsState,
     notifyTyping,
     selectConversation,
     loadOlder,
