@@ -352,17 +352,24 @@ src/Message/
 |---|---|---|
 | `ConversationRepositoryInterface`, `MessageRepositoryInterface`, `UserRepositoryInterface` | secondaire | Doctrine **DBAL** + mappers écrits à la main |
 | `EventPublisherInterface` | secondaire | Mercure (`Realtime/Infrastructure`) |
-| `Psr\Clock\ClockInterface` (PSR-20) | secondaire | horloge système |
-| `IdGeneratorInterface` | secondaire | ULID via `symfony/uid` |
+| `IdGeneratorInterface` (port de `Domain`) | secondaire | ULID via `symfony/uid`, dans `Infrastructure` |
+| `Psr\Clock\ClockInterface` (PSR-20, consommé par `Application`) | secondaire | `symfony/clock` |
 | Contrôleurs HTTP → bus | primaire | Symfony |
 
 L'horloge et le générateur d'identifiants en ports, ce n'est pas du dogmatisme : c'est ce qui rend les
 tests **déterministes** — ULIDs fixes et temps gelé, indispensable pour tester l'ordre des messages et
 la pagination keyset sans flakiness.
 
-Pour l'horloge on prend **`Psr\Clock\ClockInterface`** (PSR-20) plutôt qu'un port maison : l'interface
-standard existe, la réinventer n'apporterait rien. `psr/clock` rejoint `symfony/uid` dans les
-dépendances autorisées de `Domain/` — c'est une interface normalisée, pas un framework.
+Les deux ne vivent pas au même endroit, et la nuance a des conséquences (section 3.5) :
+
+- **`IdGeneratorInterface` est un port de `Domain`.** Que les identifiants soient générés par le
+  serveur et triables par le temps est une contrainte métier ([[Modèle de données]], décision 2), pas
+  un détail technique. L'interface est déclarée dans le domaine ; `symfony/uid` n'apparaît que dans
+  l'implémentation, en `Infrastructure`.
+- **L'horloge est consommée par `Application`.** Les entités reçoivent un `DateTimeImmutable` déjà
+  résolu ; elles ne demandent jamais l'heure. On prend `Psr\Clock\ClockInterface` (PSR-20) plutôt qu'un
+  port maison — l'interface standard existe, la réinventer n'apporterait rien — et `symfony/clock`
+  fournit `MockClock` pour geler le temps en test.
 
 ### 3.3 CQS, pas CQRS
 
@@ -487,10 +494,29 @@ signifie « déjà présent » → un `SELECT` récupère l'existant. Le cas nom
 du contrôle de flux ordinaire, pas par une exception — plus lisible, et l'intention est portée par le
 SQL lui-même.
 
-**Exceptions pragmatiques documentées** : `Domain/` dépend de `symfony/uid` (ULID) et de `psr/clock`
-(PSR-20). Ce sont une bibliothèque autonome et une interface normalisée, pas des frameworks ;
-réimplémenter l'une ou l'autre serait du zèle sans bénéfice. Toutes deux sont whitelistées
-explicitement dans `deptrac.yaml`. Ce sont les **seules**.
+#### `Domain/` n'a aucune dépendance externe
+
+**Zéro paquet Composer**, pas même `symfony/uid`. Aucune exception whitelistée dans `deptrac.yaml`.
+
+L'ULID est le seul candidat sérieux à une dépendance, et il ne résiste pas à l'examen. Ce que le
+domaine fait d'un identifiant :
+
+| Besoin | Comment | Dépendance |
+|---|---|---|
+| Valider le format | expression régulière `/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/` (26 caractères, base32 Crockford) | aucune |
+| Ordonner par le temps | tri lexicographique de la chaîne — c'est *la* propriété de l'ULID | aucune |
+| **Générer** | `IdGeneratorInterface`, port implémenté en `Infrastructure` avec `symfony/uid` | hors du domaine |
+| Extraire le timestamp | **jamais** : on a une colonne `created_at` explicite (section 2) | sans objet |
+
+Le domaine ne génère pas d'identifiant, il en reçoit. Une bibliothèque ULID dans `Domain/` ne servirait
+donc qu'à remplacer une expression régulière — un couplage sans contrepartie.
+
+> Un test verrouille la validation de `MessageId` sur des cas connus (longueur, caractères exclus `I`,
+> `L`, `O`, `U`, premier caractère > `7`). C'est la seule contrepartie de ne pas utiliser
+> `Ulid::isValid()`, et elle est bon marché.
+
+Bénéfice concret : la règle deptrac s'énonce sans exception — « `Domain` ne dépend de rien ». Une règle
+sans dérogation ne se négocie pas et ne se dégrade pas.
 
 ### 3.6 Agrégats et frontières
 
@@ -535,7 +561,8 @@ d'être un `if` à ne pas oublier.
 
 `qossmic/deptrac` échoue le build si :
 
-- `Domain` référence `Symfony\*`, `Doctrine\*` (hors whitelist `symfony/uid`) ;
+- `Domain` référence **quoi que ce soit hors de lui-même et du cœur de PHP** — aucune whitelist
+  (section 3.5) ;
 - `Application` référence `Infrastructure` ;
 - un contexte référence le `Domain` d'un autre contexte (ils communiquent par identifiants, pas par
   objets).

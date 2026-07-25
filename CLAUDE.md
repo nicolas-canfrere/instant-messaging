@@ -16,8 +16,10 @@ Conception : `docs/superpowers/specs/`. Concepts et raisonnements : vault Obsidi
   story ou dans la doc doit être exécutable telle quelle.
 - **Ne pas bootstraper le projet Symfony ni installer de paquets Composer.** C'est Nicolas
   qui s'en charge. Signaler les paquets manquants, ne pas les installer.
-- **`Domain/` ne dépend de rien** — ni Symfony, ni Doctrine. Seule exception whitelistée :
-  `symfony/uid`. `deptrac` échoue le build en cas de violation.
+- **`Domain/` ne dépend de rien** — zéro paquet Composer, **aucune exception**, pas même
+  `symfony/uid`. Le domaine valide un ULID par expression régulière et ne le génère jamais
+  (c'est `IdGeneratorInterface`, implémenté en `Infrastructure`). `deptrac` échoue le build
+  en cas de violation.
 
 ## Infrastructure
 
