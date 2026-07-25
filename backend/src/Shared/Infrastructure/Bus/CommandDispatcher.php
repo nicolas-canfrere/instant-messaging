@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace App\Shared\Infrastructure\Bus;
 
-use Symfony\Component\Messenger\Exception\LogicException;
+use App\Shared\Application\Bus\CommandInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
-use Symfony\Component\Messenger\Stamp\HandledStamp;
 
 /**
- * Deballe le resultat du handler. Sans cela, chaque controleur repeterait la
- * gymnastique des stamps Messenger — et pourrait se tromper de bus.
+ * Une commande ne rend rien. Pour connaitre l'effet d'une ecriture, on pose
+ * ensuite une question au `query.bus` — c'est la separation CQS, pas une gene.
+ *
+ * Aucune verification « aucun handler » ici : le bus leve deja
+ * NoHandlerForMessageException de lui-meme.
  */
 final readonly class CommandDispatcher
 {
@@ -18,15 +20,8 @@ final readonly class CommandDispatcher
     {
     }
 
-    public function dispatch(object $command): mixed
+    public function dispatch(CommandInterface $command): void
     {
-        $envelope = $this->commandBus->dispatch($command);
-        $stamp = $envelope->last(HandledStamp::class);
-
-        if (!$stamp instanceof HandledStamp) {
-            throw new LogicException(sprintf('Aucun handler n\'a traite %s.', $command::class));
-        }
-
-        return $stamp->getResult();
+        $this->commandBus->dispatch($command);
     }
 }

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Conversation\Application\Query;
 
+use App\Shared\Application\Bus\QueryInterface;
 use App\Shared\Domain\Identifier\UserId;
 
-final readonly class ListMyConversations
+/** @implements QueryInterface<list<ConversationView>> */
+final readonly class ListMyConversationsQuery implements QueryInterface
 {
     public function __construct(public UserId $userId)
     {

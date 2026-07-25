@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Conversation\Infrastructure\Http;
 
-use App\Conversation\Application\Command\CreateDirectConversation;
-use App\Shared\Domain\Identifier\ConversationId;
+use App\Conversation\Application\Command\CreateDirectConversationCommand;
+use App\Conversation\Application\Query\GetDirectConversationIdQuery;
 use App\Shared\Domain\Identifier\UserId;
 use App\Shared\Infrastructure\Bus\CommandDispatcher;
+use App\Shared\Infrastructure\Bus\QueryDispatcher;
 use App\Shared\Infrastructure\Security\SecurityUser;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -21,8 +22,10 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
  */
 final readonly class CreateConversationController
 {
-    public function __construct(private CommandDispatcher $commands)
-    {
+    public function __construct(
+        private CommandDispatcher $commands,
+        private QueryDispatcher $queries,
+    ) {
     }
 
     #[Route('/api/conversations', name: 'conversations_create', methods: ['POST'])]
@@ -37,12 +40,14 @@ final readonly class CreateConversationController
             throw new UnsupportedConversationPayloadException();
         }
 
-        $conversationId = $this->commands->dispatch(new CreateDirectConversation(
-            $securityUser->userId(),
-            UserId::fromString($memberIds[0]),
-        ));
+        $me = $securityUser->userId();
+        $peer = UserId::fromString($memberIds[0]);
 
-        \assert($conversationId instanceof ConversationId);
+        // La commande ne rend rien : on ecrit, puis on demande. La creation
+        // etant idempotente, la question a une reponse dans les deux cas.
+        $this->commands->dispatch(new CreateDirectConversationCommand($me, $peer));
+
+        $conversationId = $this->queries->ask(new GetDirectConversationIdQuery($me, $peer));
 
         return new JsonResponse(['id' => $conversationId->toString()], Response::HTTP_CREATED);
     }

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Conversation\Infrastructure\Http;
 
 use App\Conversation\Application\Query\ConversationView;
-use App\Conversation\Application\Query\ListMyConversations;
+use App\Conversation\Application\Query\ListMyConversationsQuery;
 use App\Shared\Infrastructure\Bus\QueryDispatcher;
 use App\Shared\Infrastructure\Security\SecurityUser;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -21,8 +21,9 @@ final readonly class ListConversationsController
     #[Route('/api/conversations', name: 'conversations_list', methods: ['GET'])]
     public function __invoke(#[CurrentUser] SecurityUser $securityUser): JsonResponse
     {
-        /** @var list<ConversationView> $views */
-        $views = $this->queries->ask(new ListMyConversations($securityUser->userId()));
+        // Le parametre de QueryInterface donne le type du resultat : plus besoin
+        // de le restreindre a la main cote appelant.
+        $views = $this->queries->ask(new ListMyConversationsQuery($securityUser->userId()));
 
         return new JsonResponse(array_map(
             static fn(ConversationView $view): array => $view->toArray(),
