@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    // "bundler" dit a TypeScript de resoudre les imports comme Vite le fait :
+    // pas d'extension `.js` a ecrire a la main dans les imports.
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+
+    "strict": true,
+    // Un acces par index (`tableau[0]`) rend `T | undefined` : le compilateur
+    // force a traiter le cas ou l'element n'existe pas. Indispensable des qu'on
+    // manipulera des listes de messages venant du reseau.
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    // Les imports de types doivent s'ecrire `import type { X }` : le
+    // transpileur de Vite compile fichier par fichier et ne peut pas deviner
+    // seul qu'un import ne sert qu'au typage.
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true
+  },
+  "include": ["src", "vite.config.ts", "tailwind.config.ts"]
+}

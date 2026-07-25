@@ -1,0 +1,6 @@
+/* Ces trois directives sont remplacees par Tailwind au moment du build :
+   `base` pose la remise a zero des styles navigateur, `components` les classes
+   composees, `utilities` les milliers de classes utilitaires. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
