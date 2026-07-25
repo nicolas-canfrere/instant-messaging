@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { ulid } from 'ulid';
 import { api } from '../api/client';
+import { ProblemError } from '../api/problem';
 import { retryWithBackoff } from '../api/retry';
 import type { ApiMessage, ConversationSummary, Me, UserSummary } from '../api/types';
 import { RealtimeClient, type EventSourceLike } from '../realtime/RealtimeClient';
@@ -108,6 +109,40 @@ function toStoredMessage(payload: Record<string, unknown>): StoredMessage {
   };
 }
 
+/**
+ * Delai d'anti-rebond du rafraichissement de la liste des conversations.
+ *
+ * Chaque `message.created` change le dernier message affiche dans la colonne de
+ * gauche, mais une rafale de vingt messages dans un groupe actif n'a pas besoin
+ * de vingt `GET /api/conversations` : un seul, une fois la rafale retombee,
+ * donne le meme resultat. 300 ms est sous le seuil de perception.
+ */
+const CONVERSATIONS_REFRESH_DEBOUNCE_MS = 300;
+
+/**
+ * Le navigateur n'a pas de logger : `console.error` est ici l'equivalent d'un
+ * `error` PSR-3, et introduire une dependance de journalisation pour trois
+ * appels n'aurait aucun sens.
+ *
+ * Comme cote backend, on ne journalise que des faits et des identifiants :
+ * jamais le contenu d'un message, jamais la charge utile brute d'un evenement.
+ * D'ou le tri ci-dessous : le `detail` d'un ProblemError vient du serveur et est
+ * sur, tandis que le message d'un `SyntaxError` de `JSON.parse` recopie un
+ * morceau de la charge utile — donc, potentiellement, du texte d'un message.
+ * Dans ce cas on ne garde que le nom de l'erreur.
+ */
+function reportRealtimeIssue(reason: string, cause: unknown): void {
+  let detail = 'cause inconnue';
+
+  if (cause instanceof ProblemError) {
+    detail = `${cause.status} ${cause.detail}`;
+  } else if (cause instanceof Error) {
+    detail = cause.name;
+  }
+
+  console.error(`[temps reel] ${reason} : ${detail}`);
+}
+
 export type AppState = {
   me: Me;
   users: Record<string, UserSummary>;
@@ -138,6 +173,8 @@ export function useAppState(me: Me): AppState {
    * survient dans la meme frame (typiquement deux evenements `scroll` d'affilee).
    */
   const loadingRef = useRef<Set<string>>(new Set());
+  /** Conversations directes dont le detail a deja ete demande (en vol ou abouti). */
+  const peerRequestsRef = useRef<Set<string>>(new Set());
   /** Lu par des callbacks dont l'identite doit rester stable : on passe par une ref. */
   const messagesStateRef = useRef(messagesState);
   messagesStateRef.current = messagesState;
@@ -245,11 +282,26 @@ export function useAppState(me: Me): AppState {
    *  2. rafraichir la liste — sinon la nouvelle conversation n'apparait pas.
    *  3. la selectionner — sans quoi l'utilisateur aurait cree dans le vide et
    *     devrait la retrouver lui-meme dans la colonne de gauche.
+   *
+   * Aucun de ces trois gestes ne peut faire echouer la creation : quand on
+   * arrive ici, le POST a deja repondu, la conversation EXISTE. Laisser le rejet
+   * remonter afficherait « Creation impossible. » a l'utilisateur, qui
+   * recliquerait — et creerait un second groupe identique, les groupes n'etant
+   * pas idempotents cote serveur, contrairement aux directs. On degrade donc :
+   * on selectionne quand meme, et l'anomalie part dans la console.
    */
   const afterCreated = useCallback(
     async (conversationId: string): Promise<void> => {
-      await clientRef.current?.resubscribe();
-      await refreshConversations();
+      try {
+        // `resubscribe()` ne rejette plus (il signale par `onError`) ; c'est
+        // `refreshConversations()` qui peut encore echouer ici.
+        await clientRef.current?.resubscribe();
+        await refreshConversations();
+      } catch (cause) {
+        reportRealtimeIssue('gestes de suivi apres creation echoues', cause);
+      }
+
+      // Hors du `try` : la selection doit avoir lieu dans tous les cas.
       selectConversation(conversationId);
     },
     [refreshConversations, selectConversation],
@@ -290,36 +342,84 @@ export function useAppState(me: Me): AppState {
    * demande qu'une fois par conversation directe, et jamais pour un groupe qui
    * porte deja un titre. (Un champ `peer_id` dans la liste supprimerait ces
    * appels — c'est un changement backend, hors du perimetre de cette tache.)
+   *
+   * La garde est une `ref` et non l'etat `peers`, pour deux raisons :
+   *  - `peers` ne connait que les requetes TERMINEES. Les requetes EN VOL y sont
+   *    invisibles, donc chaque nouveau rendu de la liste les relancait toutes ;
+   *  - l'effet ecrivait `peers` et en dependait, ce qui le faisait re-tourner a
+   *    chaque reponse. Avec vingt directs, cela donnait de l'ordre de 200
+   *    `GET /api/conversations/{id}` redondants.
+   * `peers` disparait donc des dependances : le seul declencheur legitime est
+   * l'arrivee d'une nouvelle liste de conversations.
    */
   useEffect(() => {
-    let cancelled = false;
-
+    // Pas de drapeau `cancelled` ici, contrairement au chargement initial : la
+    // ref rend chaque appel unique pour toute la vie du hook, et ignorer une
+    // reponse tardive parce que la liste a change entre-temps la perdrait pour
+    // de bon (en StrictMode, le second montage sauterait l'appel deja marque).
+    // L'ecriture est idempotente et indexee par conversation : rien a annuler.
     for (const conversation of conversations) {
-      if (conversation.type !== 'direct' || peers[conversation.id] !== undefined) {
+      // Meme motif que `loadingRef` dans `loadPage`, mais avec sa PROPRE ref :
+      // les deux Set sont indexes par `conversationId`, les partager ferait
+      // qu'un chargement de page bloquerait la resolution de l'interlocuteur.
+      if (conversation.type !== 'direct' || peerRequestsRef.current.has(conversation.id)) {
         continue;
       }
 
-      void api.conversation(conversation.id).then((detail) => {
-        const peer = detail.members.find((member) => member.user_id !== me.id);
-        if (cancelled || peer === undefined) return;
+      peerRequestsRef.current.add(conversation.id);
 
-        setPeers((current) => ({ ...current, [detail.id]: peer.user_id }));
-      });
+      void api
+        .conversation(conversation.id)
+        .then((detail) => {
+          const peer = detail.members.find((member) => member.user_id !== me.id);
+          if (peer === undefined) return;
+
+          setPeers((current) => ({ ...current, [detail.id]: peer.user_id }));
+        })
+        .catch((cause: unknown) => {
+          // On retire la marque : la conversation reste sans nom d'interlocuteur,
+          // mais un prochain rafraichissement de la liste retentera. Sans cela,
+          // une seule erreur reseau la condamnerait pour toute la session.
+          peerRequestsRef.current.delete(conversation.id);
+          reportRealtimeIssue('interlocuteur non resolu', cause);
+        });
     }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [conversations, peers, me.id]);
+  }, [conversations, me.id]);
 
   useEffect(() => {
+    /**
+     * Anti-rebond du rafraichissement de la liste : chaque message recu
+     * repousse l'appel plutot que d'en declencher un. Vingt messages d'affilee
+     * dans un groupe actif donnent ainsi un seul `GET /api/conversations` au
+     * lieu de vingt. Le timer vit dans l'effet (et non dans une ref) parce que
+     * sa duree de vie est exactement celle de la connexion temps reel.
+     */
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleConversationsRefresh = () => {
+      if (refreshTimer !== null) {
+        clearTimeout(refreshTimer);
+      }
+
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+
+        // Le `.catch` n'est pas decoratif : sans lui, un `GET` en echec devient
+        // un rejet non gere, invisible autrement que dans la console du
+        // navigateur — et sans indiquer d'ou il vient.
+        void refreshConversations().catch((cause: unknown) => {
+          reportRealtimeIssue('rafraichissement de la liste echoue', cause);
+        });
+      }, CONVERSATIONS_REFRESH_DEBOUNCE_MS);
+    };
+
     const client = new RealtimeClient({
       fetchToken: api.realtimeToken,
       createEventSource: createBrowserEventSource,
       onEvent: (event) => {
         if (event.type === 'message.created') {
           dispatch({ type: 'message/received', message: toStoredMessage(event.payload) });
-          void refreshConversations();
+          scheduleConversationsRefresh();
           return;
         }
 
@@ -327,9 +427,14 @@ export function useAppState(me: Me): AppState {
           // Quelqu un nous a ajoute (ou retire) : notre JWT ne couvre pas encore
           // ce topic. On en redemande un et on rouvre le flux.
           void client.resubscribe();
-          void refreshConversations();
+          scheduleConversationsRefresh();
         }
       },
+      // Sans ce branchement, un flux interrompu ou une charge utile illisible
+      // etaient avales sans la moindre trace : l'interface restait parfaite et
+      // silencieuse. On ne journalise ni le contenu ni la charge utile brute
+      // (voir `reportRealtimeIssue`).
+      onError: (cause) => reportRealtimeIssue('flux temps reel en defaut', cause),
     });
 
     void client.start();
@@ -339,7 +444,13 @@ export function useAppState(me: Me): AppState {
     // fois : sans ce `stop()`, le premier flux resterait ouvert pour toujours.
     // `[]` (avec `refreshConversations` stable) est volontaire — un tableau de
     // dependances changeant fermerait et rouvrirait le flux a chaque rendu.
-    return () => client.stop();
+    return () => {
+      if (refreshTimer !== null) {
+        clearTimeout(refreshTimer);
+      }
+
+      client.stop();
+    };
   }, [refreshConversations]);
 
   return {
