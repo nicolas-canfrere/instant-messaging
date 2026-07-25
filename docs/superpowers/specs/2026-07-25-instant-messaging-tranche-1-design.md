@@ -609,6 +609,83 @@ repères immédiatement.
 
 Ces conventions sont vérifiées par PHP-CS-Fixer là où c'est automatisable ; le reste tient à la revue.
 
+### 3.11 Journalisation
+
+**Exigence : logguer abondamment, partout où c'est utile, avec des niveaux PSR-3 correctement
+distingués.** Un log par niveau réel de gravité, pas huit synonymes de « il s'est passé un truc ».
+
+#### Où l'on loggue — et où l'on ne loggue pas
+
+| Couche | Loggue ? | Pourquoi |
+|---|---|---|
+| `Domain` | **jamais** | zéro dépendance (section 3.5) : y injecter `psr/log` casserait la règle. Un fait notable s'y exprime par un **domain event** ou une **exception**, pas par une ligne de log |
+| `Application` | oui, c'est le lieu principal | les use cases connaissent l'intention métier — c'est là que « Bob a envoyé un message dans la conversation X » a un sens |
+| `Infrastructure` | oui, pour les I/O | résultats des appels sortants : publication Mercure, requêtes SQL lentes, émission de JWT |
+
+`psr/log` est autorisé dans `Application` et `Infrastructure`, **interdit dans `Domain`** — règle
+deptrac.
+
+#### Deux sources complémentaires
+
+1. **Un middleware de log sur les bus** (`command.bus` et `query.bus`) : début, succès ou échec, durée,
+   pour **chaque** commande et requête, uniformément. Aucune ligne répétitive dans les handlers, et une
+   couverture qui ne peut pas être oubliée.
+2. **Des logs explicites dans les handlers**, pour ce que le middleware ne peut pas savoir : un rejeu
+   idempotent détecté, un membre ajouté, un token réémis.
+
+#### Niveaux : sémantique retenue pour ce projet
+
+| Niveau | Sens | Exemples concrets |
+|---|---|---|
+| `emergency` | système inutilisable | **non utilisé par le code applicatif** — réservé à l'infrastructure |
+| `alert` | intervention humaine immédiate | hub Mercure injoignable de façon répétée : plus aucun temps réel, l'app est fonctionnellement cassée |
+| `critical` | composant vital indisponible | perte de connexion PostgreSQL ; échec de publication après épuisement des tentatives |
+| `error` | opération échouée, non rattrapée | exception non gérée remontée en 500 ; transaction annulée |
+| `warning` | anomalie rattrapée, ou signal de bug ailleurs | **même `client_message_id` avec un contenu différent** (bug ou abus côté client) ; tentative d'accès à une conversation dont on n'est pas membre ; JWT Mercure expiré à la reconnexion |
+| `notice` | événement métier normal mais significatif | conversation créée, membre ajouté ou retiré, connexion d'un utilisateur |
+| `info` | flux nominal | message envoyé et publié, page d'historique servie, token Mercure réémis |
+| `debug` | détail de mise au point | SQL exécuté et durée, topics inscrits dans un JWT, décision de dédup |
+
+> **Choisir de ne pas utiliser `emergency` fait partie du bon usage des niveaux.** Un niveau qu'on
+> émet « au cas où » perd son sens : si `emergency` peut vouloir dire n'importe quoi, il ne déclenche
+> plus rien. Même logique pour `alert`, réservé au seul cas où le temps réel est totalement rompu.
+
+Le repère pratique : **`warning` et au-dessus doivent être actionnables.** Si personne ne ferait rien en
+lisant la ligne, c'est un `info` ou un `notice`.
+
+#### Confidentialité : ce qu'on ne loggue jamais
+
+> Sur une messagerie, c'est une contrainte de conception, pas une précaution de style.
+
+**Interdits absolus** : le `content` d'un message, le JWT Mercure ou le cookie de session, un mot de
+passe même haché, l'adresse e-mail complète.
+
+**On loggue des identifiants, jamais des charges utiles.** `message_id`, `conversation_id`, `user_id`,
+et à la rigueur la *longueur* du contenu. Un log `debug` n'échappe pas à la règle : le mode debug finit
+toujours par être activé en production un jour de panne.
+
+#### Forme
+
+- **Logs structurés** : message court et constant, variables dans le tableau de contexte
+  (`$logger->info('Message sent', ['message_id' => …, 'conversation_id' => …])`), jamais interpolées
+  dans la chaîne. C'est ce qui rend les logs cherchables et agrégeables.
+- **Un canal Monolog par contexte** : `identity`, `conversation`, `message`, `realtime`.
+- **Un identifiant de corrélation par requête HTTP**, propagé dans le contexte de toutes les lignes
+  qu'elle produit — indispensable pour reconstituer un envoi de message de bout en bout.
+- **Une erreur se loggue une seule fois**, à la frontière qui la traite. Loguer puis relancer produit la
+  même erreur trois fois dans le fichier avec trois niveaux différents.
+
+#### Configuration par environnement
+
+| Env | Stratégie |
+|---|---|
+| `dev` | tout à partir de `debug`, sur `stderr` (conteneur) |
+| `test` | `error` et au-dessus, pour ne pas noyer la sortie de PHPUnit |
+| `prod` | handler `fingers_crossed` déclenché sur `error` — les lignes `debug` sont **conservées en mémoire et écrites uniquement si une erreur survient** |
+
+Le `fingers_crossed` est ce qui rend l'exigence « logguer abondamment » soutenable : on garde la trace
+complète menant à l'incident, sans écrire des gigaoctets de `debug` en fonctionnement normal.
+
 ---
 
 ## Section 4 — API HTTP

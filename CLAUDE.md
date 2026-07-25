@@ -93,6 +93,29 @@ des types **non interchangeables**. Les invariants vivent dans le VO (`MessageCo
 valide sa longueur), pas dans le contrôleur. Les topics Mercure se construisent via
 `Topic::conversation()` / `Topic::userSystem()`, jamais par concaténation de chaînes.
 
+### Journalisation
+
+**Logguer abondamment**, avec des niveaux PSR-3 réellement distingués.
+
+- `Domain` ne loggue **jamais** (zéro dépendance) : un fait notable y est un domain event
+  ou une exception. `psr/log` est autorisé dans `Application` et `Infrastructure`.
+- Un middleware de log sur les bus couvre chaque commande/query (début, issue, durée) ;
+  les handlers ajoutent les logs que le middleware ne peut pas connaître.
+- Niveaux : `alert` = temps réel totalement rompu · `critical` = composant vital indisponible
+  · `error` = opération échouée non rattrapée · `warning` = anomalie rattrapée ou signal de
+  bug ailleurs (même `client_message_id` avec contenu différent, accès non autorisé) ·
+  `notice` = événement métier normal mais significatif · `info` = flux nominal · `debug` =
+  détail de mise au point. **`emergency` n'est pas utilisé par le code applicatif.**
+- Repère : **`warning` et au-dessus doivent être actionnables.**
+
+**Ne jamais logguer** : le `content` d'un message, un JWT ou cookie de session, un mot de
+passe même haché, un e-mail complet. On loggue des **identifiants**, jamais des charges
+utiles — y compris en `debug`.
+
+Logs **structurés** : message court et constant, variables dans le contexte, jamais
+interpolées. Un canal Monolog par contexte. Un identifiant de corrélation par requête. Une
+erreur se loggue **une seule fois**, à la frontière qui la traite.
+
 ### Domain events
 
 Enregistrés sur l'agrégat, dispatchés **après le commit** par le middleware transactionnel
