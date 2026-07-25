@@ -178,6 +178,9 @@ pas `vitest`) est en place dès T1.
 | Périmètre | Qui |
 |---|---|
 | Bootstrap Symfony + installation des paquets Composer | **Nicolas** |
+| `Makefile` (une partie déjà posée) | **Nicolas** |
+| Configuration PHPStan (niveau `max`) et PHP-CS-Fixer | **Nicolas** |
+| Configuration deptrac | **à deux** |
 | Code backend (domaine, use cases, adaptateurs, tests) | Claude |
 | Frontend intégral (setup Vite compris) | Claude — Nicolas est novice sur cette partie |
 | Infra Docker, Caddy, Mercure | Claude |
@@ -198,46 +201,38 @@ store, restauration du scroll), et les revues front doivent expliquer le *pourqu
 projet ne doit les invoquer directement.
 
 **Le `Makefile` est la seule interface.** Chaque cible enveloppe un `docker compose`, ce qui rend la
-contrainte invisible à l'usage :
+contrainte invisible à l'usage.
 
-```makefile
-make up              # docker compose up -d
-make sh              # shell dans le conteneur backend
-make composer c=…    # docker compose run --rm backend composer $(c)
-make npm c=…         # docker compose run --rm frontend npm $(c)
-make migrate         # console doctrine:migrations:migrate
-make fixtures        # console app:fixtures:load
-make test            # phpunit + vitest, chacun dans son conteneur
-make qa              # test + phpstan + cs-fixer + deptrac
-```
+> **Le `Makefile` est en partie écrit par Nicolas.** Cette spec ne fige donc **aucun nom de cible**.
+> Avant d'écrire une commande dans une story ou dans la documentation, **lire le `Makefile`** et
+> utiliser les cibles qui existent réellement. En l'absence de cible adaptée, passer par
+> `docker compose run --rm <service> <cmd>` et signaler le manque plutôt qu'inventer une cible.
 
 Conséquence sur la rédaction du plan et des stories : toute commande écrite dans la documentation ou
 dans une story passe par `make` ou par `docker compose run`. Une story qui dirait « lancer
 `vendor/bin/phpunit` » serait inexécutable telle quelle.
-
-#### Amorçage : l'œuf et la poule
-
-Le bootstrap Symfony a lieu **avant** qu'une image `backend` existe. Il se fait avec une image
-officielle jetable, montée sur le dossier du projet :
-
-```bash
-docker run --rm -v "$PWD/backend:/app" -w /app composer:2 \
-  create-project symfony/skeleton .
-```
-
-Les `composer require` du bootstrap suivent le même schéma tant que le `Dockerfile` backend n'existe
-pas ; ensuite ils passent par `make composer`.
 
 #### Outils qualité : en `require-dev`
 
 **Décision** : PHPStan, PHP-CS-Fixer et deptrac sont des dépendances `require-dev` de l'application,
 au même titre que PHPUnit. Ils s'exécutent depuis `vendor/bin/`, dans le conteneur backend.
 
-| Outil | Paquet | Seuil |
-|---|---|---|
-| PHPStan | `phpstan/phpstan` (+ `phpstan/phpstan-symfony`) | **niveau 8**, échec du build en dessous |
-| PHP-CS-Fixer | `friendsofphp/php-cs-fixer` | `@Symfony` + `@PSR12`, `--dry-run` en CI |
-| deptrac | `qossmic/deptrac` | zéro violation tolérée (section 3.8) |
+| Outil | Paquet | Seuil | Configuration |
+|---|---|---|---|
+| PHPStan | `phpstan/phpstan` (+ `phpstan/phpstan-symfony`) | **niveau `max`** | **Nicolas** |
+| PHP-CS-Fixer | `friendsofphp/php-cs-fixer` | zéro écart, `--dry-run` en CI | **Nicolas** (fichier de config dédié) |
+| deptrac | `qossmic/deptrac` | zéro violation tolérée (section 3.8) | **à définir ensemble** |
+
+**PHPStan au niveau `max`** — pas 8, le maximum. Conséquence directe sur la façon d'écrire le code, à
+intégrer dès la première story plutôt qu'à subir ensuite : génériques annotés sur les collections
+(`@return list<MessageView>`), types de tableaux précis pour les lignes DBAL
+(`array{id: string, content: string, …}`), aucun `mixed` implicite. Le retour de
+`Connection::fetchAssociative()` est typé très largement par DBAL : c'est le point qui produira le plus
+de bruit au niveau `max`, et les mappers de la section 3.5 sont l'endroit désigné pour le canaliser —
+une seule frontière où l'on passe du tableau brut au type précis, plutôt que des assertions dispersées.
+
+La configuration de deptrac se fera à deux : c'est elle qui encode les couches et les contextes de la
+section 3.1, donc elle mérite d'être écrite en même temps qu'on pose la première arborescence réelle.
 
 L'objection classique — « ces outils tirent leurs propres versions de composants Symfony et contraignent
 celles de l'application » — ne tient plus : `phpstan/phpstan` et `qossmic/deptrac` sont distribués en
@@ -737,8 +732,8 @@ pas de `setup-node`. La CI lance `make qa`, exactement ce que Nicolas lance en l
 C'est ce qui garantit qu'un build vert en local l'est aussi en CI : mêmes images, mêmes versions,
 mêmes PHARs épinglés.
 
-Contenu de `make qa` : PHPUnit (avec un service Postgres), Vitest, PHPStan niveau 8, PHP-CS-Fixer en
-`--dry-run`, **deptrac**. CI par chemin : `backend/**` ne déclenche pas Vitest.
+Contenu : PHPUnit (avec un service Postgres), Vitest, PHPStan niveau `max`, PHP-CS-Fixer en `--dry-run`,
+**deptrac**. CI par chemin : `backend/**` ne déclenche pas Vitest.
 
 `deptrac` est ce qui empêche l'architecture de se dégrader silencieusement — sans lui, la règle de
 dépendance de la section 3.1 se serait érodée en quelques semaines.

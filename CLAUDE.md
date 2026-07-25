@@ -97,9 +97,17 @@ vie de l'`EventSource`, dédup, restauration du scroll) et expliquer le *pourquo
 
 ## Qualité
 
-PHPStan **niveau 8**, PHP-CS-Fixer (`@Symfony` + `@PSR12`), deptrac (zéro violation).
-Les trois sont en **`require-dev`** dans `composer.json`, comme PHPUnit, et s'exécutent
-depuis `vendor/bin/` **dans le conteneur backend**.
+PHPStan **niveau `max`**, PHP-CS-Fixer, deptrac (zéro violation). Les trois sont en
+**`require-dev`** dans `composer.json`, comme PHPUnit, et s'exécutent depuis `vendor/bin/`
+**dans le conteneur backend**.
+
+Les configs PHPStan et PHP-CS-Fixer sont à la charge de Nicolas — **ne pas les modifier**,
+et ne jamais ajouter de `baseline` ni d'`@phpstan-ignore` pour faire passer du code. La
+config deptrac se décide à deux.
+
+Niveau `max` : annoter les génériques (`@return list<MessageView>`), typer précisément les
+lignes DBAL (`array{id: string, …}`), aucun `mixed` implicite. Les mappers sont la frontière
+désignée où le tableau brut devient un type précis.
 
 La CI lance `make qa` dans les mêmes conteneurs que le poste de dev — pas de `setup-php`.
 
@@ -107,16 +115,9 @@ La CI lance `make qa` dans les mêmes conteneurs que le poste de dev — pas de 
 
 Toutes passent par des conteneurs (voir règles absolues).
 
-```
-make up        # lève les 5 services
-make sh        # shell dans le conteneur backend
-make composer c="require foo"   # composer dans le conteneur
-make npm c="run build"          # npm dans le conteneur
-make migrate   # migrations
-make fixtures  # jeu de données
-make test      # phpunit + vitest
-make qa        # test + phpstan + cs-fixer + deptrac
-```
+Le `Makefile` est écrit en partie par Nicolas : **le lire avant d'écrire une commande**, et
+utiliser les cibles qui existent réellement. Ne pas inventer de cible ni supposer un nom.
+S'il manque une cible, passer par `docker compose run --rm <service> <cmd>` et le signaler.
 
 ## Périmètre
 
