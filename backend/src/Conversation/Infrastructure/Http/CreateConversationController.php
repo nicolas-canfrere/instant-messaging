@@ -8,6 +8,7 @@ use App\Conversation\Application\Command\CreateDirectConversationCommand;
 use App\Conversation\Application\Command\CreateGroupConversationCommand;
 use App\Conversation\Application\Query\FindDirectConversationQuery;
 use App\Conversation\Domain\ConversationType;
+use App\Conversation\Infrastructure\Http\Payload\CreateConversationPayload;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
 use App\Shared\Domain\IdGeneratorInterface;
@@ -15,8 +16,8 @@ use App\Shared\Infrastructure\Bus\CommandDispatcher;
 use App\Shared\Infrastructure\Bus\QueryDispatcher;
 use App\Shared\Infrastructure\Security\SecurityUser;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\CurrentUser;
 
@@ -30,22 +31,21 @@ final readonly class CreateConversationController
     }
 
     #[Route('/api/conversations', name: 'conversations_create', methods: ['POST'])]
-    public function __invoke(Request $request, #[CurrentUser] SecurityUser $securityUser): JsonResponse
-    {
-        /** @var array{type?: string, title?: string, member_ids?: list<string>} $payload */
-        $payload = json_decode((string) $request->getContent(), true, 512, \JSON_THROW_ON_ERROR);
-
+    public function __invoke(
+        #[MapRequestPayload] CreateConversationPayload $payload,
+        #[CurrentUser] SecurityUser $securityUser,
+    ): JsonResponse {
+        // La charge utile est deja desserialisee et validee : le type est
+        // forcement l'une des deux valeurs de l'enum, et memberIds une liste
+        // d'ULID bien formes.
         $memberIds = array_map(
             static fn(string $id): UserId => UserId::fromString($id),
-            $payload['member_ids'] ?? [],
+            $payload->memberIds,
         );
 
-        // `tryFrom` plutot qu'une comparaison de chaines : un type inconnu
-        // devient `null`, et le match n'a plus de cas par defaut a deviner.
-        return match (ConversationType::tryFrom($payload['type'] ?? '')) {
+        return match (ConversationType::from($payload->type)) {
             ConversationType::Direct => $this->openDirect($securityUser->userId(), $memberIds),
-            ConversationType::Group => $this->createGroup($securityUser->userId(), $payload['title'] ?? '', $memberIds),
-            null => throw new UnsupportedConversationPayloadException(),
+            ConversationType::Group => $this->createGroup($securityUser->userId(), $payload->title, $memberIds),
         };
     }
 
@@ -59,7 +59,7 @@ final readonly class CreateConversationController
     private function openDirect(UserId $me, array $memberIds): JsonResponse
     {
         if (1 !== count($memberIds)) {
-            throw new UnsupportedConversationPayloadException();
+            throw new UnsupportedConversationPayloadException('Un direct se cree avec exactement un autre membre.');
         }
 
         $peer = $memberIds[0];
@@ -90,10 +90,12 @@ final readonly class CreateConversationController
      *
      * @param list<UserId> $memberIds
      */
-    private function createGroup(UserId $me, string $title, array $memberIds): JsonResponse
+    private function createGroup(UserId $me, ?string $title, array $memberIds): JsonResponse
     {
-        if ('' === trim($title)) {
-            throw new UnsupportedConversationPayloadException();
+        // Contrainte conditionnelle : un titre n'a de sens que pour un groupe,
+        // la validation de la charge utile ne peut donc pas l'exiger seule.
+        if (null === $title || '' === trim($title)) {
+            throw new UnsupportedConversationPayloadException('Un groupe requiert un titre.');
         }
 
         $conversationId = ConversationId::fromString($this->idGenerator->generate());

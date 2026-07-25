@@ -6,6 +6,7 @@ namespace App\Conversation\Infrastructure\Http;
 
 use App\Conversation\Application\Command\AddMembersCommand;
 use App\Conversation\Application\Query\GetConversationQuery;
+use App\Conversation\Infrastructure\Http\Payload\AddMembersPayload;
 use App\Conversation\Infrastructure\Security\ConversationVoter;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
@@ -13,8 +14,8 @@ use App\Shared\Infrastructure\Bus\CommandDispatcher;
 use App\Shared\Infrastructure\Bus\QueryDispatcher;
 use App\Shared\Infrastructure\Security\SecurityUser;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
@@ -32,7 +33,7 @@ final readonly class AddMembersController
     #[Route('/api/conversations/{conversationId}/members', name: 'conversation_members_add', methods: ['POST'])]
     public function __invoke(
         ConversationId $conversationId,
-        Request $request,
+        #[MapRequestPayload] AddMembersPayload $payload,
         #[CurrentUser] SecurityUser $securityUser,
     ): JsonResponse {
         // L'ordre des deux controles porte la regle : d'abord l'appartenance,
@@ -44,17 +45,10 @@ final readonly class AddMembersController
             throw new AccessDeniedException();
         }
 
-        /** @var array{user_ids?: list<string>} $payload */
-        $payload = json_decode((string) $request->getContent(), true, 512, \JSON_THROW_ON_ERROR);
-
         $userIds = array_map(
             static fn(string $id): UserId => UserId::fromString($id),
-            $payload['user_ids'] ?? [],
+            $payload->userIds,
         );
-
-        if ([] === $userIds) {
-            throw new UnsupportedConversationPayloadException();
-        }
 
         $this->commands->dispatch(new AddMembersCommand($conversationId, $userIds));
 

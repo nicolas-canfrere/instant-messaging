@@ -1,0 +1,8 @@
+framework:
+    serializer:
+        # Toute l'API parle snake_case (`member_ids`, `display_name`,
+        # `last_message_at`…), le PHP parle camelCase. Le convertisseur fait le
+        # pont une fois pour toutes, plutot qu'un #[SerializedName] par champ —
+        # qu'il suffirait d'oublier une fois pour qu'un champ arrive vide sans
+        # que rien ne proteste.
+        name_converter: 'serializer.name_converter.camel_case_to_snake_case'

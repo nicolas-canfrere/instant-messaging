@@ -13,8 +13,14 @@ namespace App\Shared\Domain\Identifier;
  */
 abstract class AbstractUlidIdentifier implements \Stringable
 {
-    /** Base32 Crockford : ni I, ni L, ni O, ni U. Premier caractere <= 7 (timestamp sur 48 bits). */
-    private const string PATTERN = '/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/';
+    /**
+     * Base32 Crockford : ni I, ni L, ni O, ni U. Premier caractere <= 7
+     * (timestamp sur 48 bits).
+     *
+     * Publique parce que les contraintes de validation des charges utiles s'y
+     * referent : c'est LA definition du format, elle ne doit exister qu'ici.
+     */
+    public const string PATTERN = '/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/';
 
     protected function __construct(private readonly string $value)
     {
