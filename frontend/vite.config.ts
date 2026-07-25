@@ -10,6 +10,19 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    // Scrutation par sondage, et non par inotify. Le code source arrive dans le
+    // conteneur par un bind mount, or les evenements inotify traversent mal
+    // cette frontiere sous Linux : ils se perdent notamment quand un fichier est
+    // REMPLACE plutot que modifie en place — ce que fait git a chaque `checkout`,
+    // `merge`, `rebase` ou `stash`, puisqu'il ecrit a cote puis renomme, ce qui
+    // change l'inode que Vite surveillait.
+    //
+    // Vite gardait alors sa transformation en cache et servait l'ANCIEN module,
+    // sans que rien ne le signale : le disque et le conteneur etaient a jour,
+    // seul le serveur etait en retard, et aucun rechargement force du navigateur
+    // n'y changeait quoi que ce soit. On relit donc les dates de modification
+    // toutes les 300 ms — un peu de CPU contre un cache qui ne ment jamais.
+    watch: { usePolling: true, interval: 300 },
     // Le navigateur parle a Caddy sur 8080, pas a Vite sur 5173.
     // Sans cette ligne, le client HMR tenterait de se connecter au mauvais port
     // et le rechargement a chaud ne fonctionnerait jamais.
