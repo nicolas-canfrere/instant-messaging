@@ -167,7 +167,7 @@ unit-test: ## Run unit tests. Usage: make unit-test ARGS="--filter=UlidIdentifie
 # la main propre. Le code de sortie de PHPUnit est propagé au travers du
 # nettoyage, sinon un échec de test passerait pour un succès en CI.
 functional-test: test-down ## Run functional tests. Usage: make functional-test ARGS="--filter=PingTest"
-	@$(DOCKER_COMPOSE_TEST) up -d --wait postgres-test
+	@$(DOCKER_COMPOSE_TEST) up -d --wait postgres-test redis-test
 	@$(DOCKER_COMPOSE_TEST_RUN) backend-test sh -c "php bin/console doctrine:database:create --if-not-exists -n -q \
 	&& php bin/console doctrine:migrations:migrate -n -q --allow-no-migration \
 	&& php bin/console app:fixtures:load -q \

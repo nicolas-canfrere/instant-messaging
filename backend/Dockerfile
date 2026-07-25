@@ -26,10 +26,12 @@ RUN apt-get update \
 # dépendances système de chaque extension puis les retire après compilation.
 #   pdo_pgsql : doctrine/dbal      intl : Symfony
 #   zip       : Composer           opcache : toujours
+#   redis     : présence éphémère (T2) — état à TTL, jamais en base
 RUN install-php-extensions \
         intl \
         opcache \
         pdo_pgsql \
+        redis \
         zip
 
 # Configuration PHP de développement (erreurs affichées, assertions actives).

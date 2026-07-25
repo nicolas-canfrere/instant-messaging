@@ -30,10 +30,14 @@ services:
       # `public_url` = ce que le navigateur ouvre, donc via l'origine unique.
       MERCURE_PUBLIC_URL: "http://localhost:8080/.well-known/mercure"
       MERCURE_JWT_SECRET: "${MERCURE_JWT_SECRET}"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
     volumes:
       - ./backend:/app
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:
@@ -59,6 +63,18 @@ services:
         cors_origins http://localhost:8080
     volumes:
       - mercure_data:/data
+
+  # Presence uniquement : etat ephemere a TTL. AUCUN volume, deliberement — un
+  # etat de presence qui survivrait au redemarrage affirmerait que des gens sont
+  # en ligne alors que plus personne ne le sait. Redis repart vide, et le premier
+  # heartbeat de chacun reconstruit tout en moins de 20 s.
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
 
   postgres:
     image: postgres:17-alpine
