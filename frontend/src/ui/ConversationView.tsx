@@ -54,9 +54,20 @@ export function ConversationView({
           `key` force le remontage au changement de conversation : c'est ce qui
           remet a zero l'ancre de scroll et le suivi du bas de fil, tous deux
           stockes en `ref` dans MessageList.
+
+          Le prefixe n'est pas cosmetique. `<section>` a plusieurs enfants
+          statiques : React les reconcilie comme un TABLEAU, ou les `key` doivent
+          etre uniques ENTRE FRERES. Ce composant et le Composer plus bas ont tous
+          deux besoin de se remonter au changement de conversation, donc tous deux
+          d'une `key` qui en depend — mais la meme des deux cotes rendait
+          l'appariement ancienne/nouvelle liste indetermine : React retrouvait la
+          fibre du Composer la ou il cherchait celle-ci, ne marquait jamais
+          l'ancienne MessageList pour suppression, et en montait une seconde a
+          cote. Chaque aller-retour entre deux conversations empilait ainsi un fil
+          de plus dans le DOM.
         */}
         <MessageList
-          key={conversation.id}
+          key={`messages-${conversation.id}`}
           thread={thread}
           users={users}
           meId={meId}
@@ -67,8 +78,11 @@ export function ConversationView({
           `key` ici aussi : changer de conversation doit vider la zone de saisie.
           Sans cela, un brouillon commence dans un fil suivrait l'utilisateur dans
           le suivant et partirait au mauvais destinataire.
+
+          Prefixe different de celui du MessageList ci-dessus : voir l'explication
+          la-bas. Deux freres ne peuvent pas porter la meme `key`.
         */}
-        <Composer key={conversation.id} onSend={onSend} />
+        <Composer key={`composer-${conversation.id}`} onSend={onSend} />
       </section>
 
       {conversation.type === 'group' && showMembers && (
