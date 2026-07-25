@@ -3,8 +3,15 @@
 Messagerie instantanée PHP/Symfony + Mercure + React. Projet **portfolio** : la qualité
 d'architecture et de code prime sur la vitesse de livraison.
 
-Conception : `docs/superpowers/specs/`. Concepts et raisonnements : vault Obsidian
-`~/Documents/obsidian_vaults/tech/InstantMessaging`.
+- **Concepts et raisonnements** : vault Obsidian `~/Documents/obsidian_vaults/tech/InstantMessaging`
+  (17 notes, en français) — le *pourquoi* de chaque mécanisme.
+- **Décisions d'architecture** : `docs/superpowers/specs/` — une spec par tranche, avec les
+  alternatives écartées et leur coût. À lire avant de proposer un changement d'archi.
+- **Plans d'implémentation** : `docs/superpowers/plans/` — une story = une branche.
+
+Découpage en 5 tranches (détail dans la spec T1) : **T1 noyau temps réel + conversations** ·
+T2 accusés & présence · T3 édition/suppression · T4 médias · T5 recherche & modération.
+**Ne pas déborder d'une tranche sur la suivante** — chacune aura sa spec et son plan.
 
 ## Règles absolues
 
@@ -46,6 +53,18 @@ Contextes : `Identity` · `Conversation` · `Message` · `Realtime` · `Shared`.
 Ils communiquent **par identifiants**, jamais en référençant le `Domain` d'un autre contexte.
 
 Règle de dépendance : `Infrastructure` → `Application` → `Domain`. Jamais l'inverse.
+
+**Les identifiants partagés vivent dans `Shared/Domain/Identifier/`** : `UserId`,
+`ConversationId`, `MessageId`. Ils sont le langage commun entre contextes — `Conversation` a
+besoin de `UserId`, `Message` a besoin de `ConversationId`. Les dupliquer par contexte serait
+pire. Les VO **spécifiques** restent chez eux : `MessageContent`, `ClientMessageId`,
+`DirectKey`, `MemberRole`, `ConversationType`, `Topic`.
+
+**Une seule dérogation inter-contextes**, explicite dans `deptrac.yaml` :
+`Realtime/Application` référence les *domain events* des autres contextes
+(`MembershipChanged`, `MessageWasSent`) — un abonné doit connaître l'événement auquel il
+s'abonne. **Ne pas élargir cette dérogation** ; toute autre communication passe par des
+identifiants.
 
 ### Persistance : DBAL, jamais l'ORM
 
@@ -155,6 +174,26 @@ En 500 : `detail` générique, jamais de message d'exception ni de fragment SQL.
 
 La traduction exception → statut HTTP vit **uniquement** dans le listener de
 `Shared/Infrastructure`. Les exceptions de `Domain` ignorent HTTP.
+
+## Temps réel — contrats à ne pas casser
+
+Les tranches suivantes étendent ces mécanismes ; les modifier casserait le front.
+
+- **Topics** construits uniquement via `Topic::conversation()` / `Topic::userSystem()`.
+  Jamais de concaténation.
+- `/users/{id}/system` est dans **tous** les JWT et **ne change jamais** : c'est le seul
+  canal par lequel un utilisateur apprend qu'on l'a ajouté à une conversation. T2 ajoutera
+  `/users/{id}/receipts` sur le même modèle.
+- **`GET /api/realtime/token`** renvoie **200** avec `{"hub_url": …, "topics": [...]}` *et*
+  pose le cookie `mercureAuthorization`. Le cookie **autorise**, le corps dit au front quels
+  topics **sélectionner** dans l'URL du hub (`?topic=…`) — Mercure exige les deux.
+- L'`id` de l'événement Mercure est **l'ULID du message** : c'est ce qui rendra
+  `Last-Event-ID` exploitable sans changer le format.
+- Un `publish` par message. Le hub fait le fan-out ; le métier reste en O(1).
+- **Publication après commit uniquement** (middleware transactionnel).
+  `Message::reconstitute()` n'enregistre aucun domain event : c'est **par là** qu'un rejeu
+  idempotent ne republie rien. Ne pas ajouter d'enregistrement d'événement dans
+  `reconstitute()`.
 
 ## Frontend
 
