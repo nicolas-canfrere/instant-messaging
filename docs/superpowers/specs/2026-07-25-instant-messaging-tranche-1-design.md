@@ -161,6 +161,62 @@ généreusement que le back** sur les points non évidents (cycle de vie de l'`E
 store, restauration du scroll), et les revues front doivent expliquer le *pourquoi*, pas seulement le
 *quoi*.
 
+### 1.8 Tout s'exécute en conteneur
+
+**Contrainte de la machine de développement : ni PHP ni Node.js ne sont installés sur l'hôte.**
+`php`, `composer`, `node`, `npm`, `vendor/bin/*` n'existent pas hors conteneur. Aucune commande du
+projet ne doit les invoquer directement.
+
+**Le `Makefile` est la seule interface.** Chaque cible enveloppe un `docker compose`, ce qui rend la
+contrainte invisible à l'usage :
+
+```makefile
+make up              # docker compose up -d
+make sh              # shell dans le conteneur backend
+make composer c=…    # docker compose run --rm backend composer $(c)
+make npm c=…         # docker compose run --rm frontend npm $(c)
+make migrate         # console doctrine:migrations:migrate
+make fixtures        # console app:fixtures:load
+make test            # phpunit + vitest, chacun dans son conteneur
+make qa              # test + phpstan + cs-fixer + deptrac
+```
+
+Conséquence sur la rédaction du plan et des stories : toute commande écrite dans la documentation ou
+dans une story passe par `make` ou par `docker compose run`. Une story qui dirait « lancer
+`vendor/bin/phpunit` » serait inexécutable telle quelle.
+
+#### Amorçage : l'œuf et la poule
+
+Le bootstrap Symfony a lieu **avant** qu'une image `backend` existe. Il se fait avec une image
+officielle jetable, montée sur le dossier du projet :
+
+```bash
+docker run --rm -v "$PWD/backend:/app" -w /app composer:2 \
+  create-project symfony/skeleton .
+```
+
+Les `composer require` du bootstrap suivent le même schéma tant que le `Dockerfile` backend n'existe
+pas ; ensuite ils passent par `make composer`.
+
+#### Outils qualité : PHARs dans l'image, pas dans `composer.json`
+
+PHPStan, PHP-CS-Fixer et deptrac tirent chacun leurs propres versions de composants Symfony. Les mettre
+en `require-dev` de l'application crée des conflits de contraintes, et pire, **fait dépendre les
+versions de l'application de celles de ses outils d'analyse**.
+
+**Décision** : les trois sont installés en **PHAR, à version épinglée, dans le `Dockerfile` du
+backend**. Ils vivent dans l'image, pas dans `composer.json`. L'application n'a alors aucune dépendance
+de développement liée à la qualité, et les mises à jour d'outillage se font en un point unique.
+
+| Outil | Rôle | Seuil |
+|---|---|---|
+| PHPStan | analyse statique | **niveau 8**, échec du build en dessous |
+| PHP-CS-Fixer | style | règles `@Symfony` + `@PSR12`, mode `--dry-run` en CI |
+| deptrac | règle de dépendance de l'hexagone | zéro violation tolérée (section 3.8) |
+
+PHPUnit reste, lui, en `require-dev` : c'est une dépendance légitime du code de test, pas un outil
+d'analyse externe.
+
 ---
 
 ## Section 2 — Modèle de données
@@ -643,8 +699,16 @@ navigateurs, Alice envoie, Bob reçoit sans rafraîchir.
 
 ### CI GitHub Actions
 
-Un workflow : `phpunit` (service Postgres), `vitest`, **`deptrac`**, PHPStan niveau 8, PHP-CS-Fixer.
-`deptrac` est ce qui empêche l'architecture de se dégrader silencieusement.
+Un workflow qui exécute **les mêmes conteneurs que le poste de développement** — pas de `setup-php`,
+pas de `setup-node`. La CI lance `make qa`, exactement ce que Nicolas lance en local (section 1.8).
+C'est ce qui garantit qu'un build vert en local l'est aussi en CI : mêmes images, mêmes versions,
+mêmes PHARs épinglés.
+
+Contenu de `make qa` : PHPUnit (avec un service Postgres), Vitest, PHPStan niveau 8, PHP-CS-Fixer en
+`--dry-run`, **deptrac**. CI par chemin : `backend/**` ne déclenche pas Vitest.
+
+`deptrac` est ce qui empêche l'architecture de se dégrader silencieusement — sans lui, la règle de
+dépendance de la section 3.1 se serait érodée en quelques semaines.
 
 ---
 

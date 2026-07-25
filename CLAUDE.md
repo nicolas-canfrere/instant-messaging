@@ -10,6 +10,10 @@ Conception : `docs/superpowers/specs/`. Concepts et raisonnements : vault Obsidi
 
 - **Jamais de commit sur `main`.** Toujours une branche, même pour une ligne.
   `feat/<story>` · `fix/<sujet>` · `docs/<sujet>` · `chore/<sujet>`
+- **Ni PHP ni Node.js ne sont installés sur la machine.** `php`, `composer`, `node`, `npm`,
+  `vendor/bin/*` n'existent **que dans les conteneurs**. Ne jamais les invoquer directement :
+  passer par `make` ou `docker compose run --rm <service> <cmd>`. Une commande écrite dans une
+  story ou dans la doc doit être exécutable telle quelle.
 - **Ne pas bootstraper le projet Symfony ni installer de paquets Composer.** C'est Nicolas
   qui s'en charge. Signaler les paquets manquants, ne pas les installer.
 - **`Domain/` ne dépend de rien** — ni Symfony, ni Doctrine. Seule exception whitelistée :
@@ -81,14 +85,28 @@ vie de l'`EventSource`, dédup, restauration du scroll) et expliquer le *pourquo
 - Commits conventionnels, en français, à l'impératif.
 - TDD : le test qui décrit le comportement avant le code.
 
+## Qualité
+
+PHPStan **niveau 8**, PHP-CS-Fixer (`@Symfony` + `@PSR12`), deptrac (zéro violation).
+Les trois sont des **PHARs épinglés dans le Dockerfile backend**, pas des dépendances de
+`composer.json` : ils tirent leurs propres versions de composants Symfony et ne doivent pas
+contraindre celles de l'application. PHPUnit reste en `require-dev`.
+
+La CI lance `make qa` dans les mêmes conteneurs que le poste de dev — pas de `setup-php`.
+
 ## Commandes
+
+Toutes passent par des conteneurs (voir règles absolues).
 
 ```
 make up        # lève les 5 services
+make sh        # shell dans le conteneur backend
+make composer c="require foo"   # composer dans le conteneur
+make npm c="run build"          # npm dans le conteneur
 make migrate   # migrations
 make fixtures  # jeu de données
 make test      # phpunit + vitest
-make qa        # test + deptrac + phpstan + cs-fixer
+make qa        # test + phpstan + cs-fixer + deptrac
 ```
 
 ## Périmètre
