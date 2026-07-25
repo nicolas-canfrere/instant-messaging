@@ -9,7 +9,9 @@ use App\Shared\Domain\Identifier\AbstractUlidIdentifier;
 /**
  * Cle d'idempotence generee par le CLIENT avant le premier envoi.
  *
- * Elle reste dans le contexte Message : aucun autre contexte n'en a besoin.
+ * Le VO reste dans le contexte Message. Seule sa valeur `string` franchit la
+ * frontiere, portee par MessageWasSent, parce que Realtime doit la remettre
+ * dans la charge utile `message.created`.
  */
 final class ClientMessageId extends AbstractUlidIdentifier
 {

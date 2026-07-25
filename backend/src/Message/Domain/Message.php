@@ -34,7 +34,14 @@ final class Message
     ): self {
         $message = new self($id, $conversationId, $senderId, $content, $clientMessageId, $now);
         $message->recordEvent(
-            new MessageWasSent($id, $conversationId, $senderId, $content->toString(), $now),
+            new MessageWasSent(
+                $id,
+                $conversationId,
+                $senderId,
+                $content->toString(),
+                $clientMessageId->toString(),
+                $now,
+            ),
         );
 
         return $message;

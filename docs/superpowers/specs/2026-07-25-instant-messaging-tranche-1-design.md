@@ -882,6 +882,26 @@ Un seul `publish` par message sur `/conversations/{id}`, en *private update*. Le
 O(N) ; le métier reste en O(1) — cf. [[Groupes et fan-out]]. L'`id` de l'événement Mercure est l'ULID
 du message, ce qui rendra `Last-Event-ID` exploitable en T2 sans changement de format.
 
+### Charge utile de `message.created`
+
+| Champ | Type | Rôle |
+|---|---|---|
+| `id` | ULID | identifiant serveur du message — aussi l'`id` de l'événement SSE |
+| `conversation_id` | ULID | le fil |
+| `sender_id` | ULID | l'expéditeur |
+| `content` | `string` | le texte |
+| `client_message_id` | ULID | **clé de réconciliation de l'envoi optimiste** — voir ci-dessous |
+| `created_at` | ISO 8601 (`ATOM`) | même format que l'historique, sinon tout tri par chaîne mélange les deux sources |
+
+`client_message_id` n'est pas facultatif. La publication a lieu **après commit, dans la même requête
+HTTP** : l'écho SSE part donc avant que la réponse du `POST` ne revienne au navigateur. Sans ce champ,
+la première passe de dédup du front (section 6) ne peut pas reconnaître l'envoi optimiste ; elle ajoute
+un second item, que la réponse HTTP dote ensuite du **même `id` serveur** que le premier — deux items
+identiques et définitifs, chez l'expéditeur lui-même.
+
+C'est pourquoi `MessageWasSent` transporte le `client_message_id`, en `string` : le VO
+`ClientMessageId` reste au contexte `Message`, seule sa valeur franchit la frontière.
+
 ### Le JWT
 
 HS256, claim `mercure.subscribe` = les topics ci-dessus, **TTL 15 min**, livré en cookie
@@ -929,6 +949,10 @@ d'accès disparaîtrait.
 L'expéditeur reçoit son propre message **deux fois** (réponse HTTP + SSE). Le store dédup d'abord par
 `client_message_id` (remplace l'optimiste), sinon par `id` serveur (ignore le doublon). C'est la
 « dédup aux deux bouts » de [[Idempotence et déduplication]].
+
+La première passe n'est possible que parce que la charge utile `message.created` porte le
+`client_message_id` (section 5) : l'écho SSE arrive **avant** la réponse du `POST`, donc l'optimiste
+n'a encore aucun `id` serveur à opposer à la seconde passe.
 
 ### Décision tranchée : même clé, contenu différent
 
