@@ -29,7 +29,13 @@ export default defineConfig({
     hmr: { clientPort: 8080 },
   },
   test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // `jsdom` et non `node` : les tests de composants ont besoin d'un DOM. Les
+    // tests purs (reducer, retry, client temps reel) n'en souffrent pas — ils
+    // ignorent simplement le document qu'on leur fournit.
+    environment: 'jsdom',
+    // `.tsx` en plus de `.ts`, sinon les tests de rendu ne sont jamais collectes
+    // et la suite passe au vert en n'executant rien.
+    include: ['src/**/*.test.{ts,tsx}'],
+    setupFiles: ['src/test-setup.ts'],
   },
 });
