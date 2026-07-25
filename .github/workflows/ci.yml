@@ -31,7 +31,7 @@ jobs:
     name: Analyse statique (PHPStan, CS, deptrac)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # `make .env` renseigne les UID/GID du runner et tire un secret Mercure au
       # hasard. Sans ce fichier, `docker compose` n'a pas ses variables.
@@ -56,7 +56,7 @@ jobs:
     name: Tests PHP (unitaires + fonctionnels)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Préparer le .env
         run: make .env
@@ -74,7 +74,7 @@ jobs:
     name: Front (tsc + Vitest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Préparer le .env
         run: make .env
