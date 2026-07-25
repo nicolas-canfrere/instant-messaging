@@ -279,6 +279,8 @@ Les tranches suivantes étendent ces mécanismes ; les modifier casserait le fro
   topics **sélectionner** dans l'URL du hub (`?topic=…`) — Mercure exige les deux.
 - L'`id` de l'événement Mercure est **l'ULID du message** : c'est ce qui rendra
   `Last-Event-ID` exploitable sans changer le format.
+- La charge utile `message.created` porte **`client_message_id`** : l'écho SSE part avant la
+  réponse du `POST`, c'est la seule clé par laquelle le front réconcilie son envoi optimiste.
 - Un `publish` par message. Le hub fait le fan-out ; le métier reste en O(1).
 - **Publication après commit uniquement** (middleware transactionnel).
   `Message::reconstitute()` n'enregistre aucun domain event : c'est **par là** qu'un rejeu
