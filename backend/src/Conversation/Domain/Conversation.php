@@ -38,7 +38,7 @@ final class Conversation
         UserId $peer,
         \DateTimeImmutable $now,
     ): self {
-        return new self(
+        $direct = new self(
             $id,
             ConversationType::Direct,
             null,
@@ -50,6 +50,10 @@ final class Conversation
                 new Member($peer, MemberRole::Admin, $now),
             ],
         );
+
+        $direct->notifyJoined($peer);
+
+        return $direct;
     }
 
     /**
@@ -75,7 +79,15 @@ final class Conversation
             $members[] = new Member($userId, MemberRole::Member, $now);
         }
 
-        return new self($id, ConversationType::Group, $title, null, $creator, $now, $members);
+        $group = new self($id, ConversationType::Group, $title, null, $creator, $now, $members);
+
+        foreach ($group->members as $member) {
+            if (!$member->userId->equals($creator)) {
+                $group->notifyJoined($member->userId);
+            }
+        }
+
+        return $group;
     }
 
     /** @param list<Member> $members */
@@ -165,7 +177,7 @@ final class Conversation
         }
 
         $this->members[] = new Member($userId, MemberRole::Member, $now);
-        $this->recordEvent(new MembershipChanged($this->id, $userId, MembershipChange::Joined));
+        $this->notifyJoined($userId);
     }
 
     public function removeMember(UserId $userId): void
@@ -182,6 +194,19 @@ final class Conversation
         ));
 
         $this->recordEvent(new MembershipChanged($this->id, $userId, MembershipChange::Left));
+    }
+
+    /**
+     * Le createur n'est jamais notifie : il vient d'agir, il connait deja le
+     * fil. Ne pas l'exclure lui ferait rouvrir son propre flux temps reel pour
+     * rien a chaque creation.
+     *
+     * `reconstitute()` n'appelle pas cette methode, et ne doit jamais le faire :
+     * c'est par la qu'un simple rechargement de l'agregat ne republie rien.
+     */
+    private function notifyJoined(UserId $userId): void
+    {
+        $this->recordEvent(new MembershipChanged($this->id, $userId, MembershipChange::Joined));
     }
 
     /** Un direct a exactement deux participants, fixes pour toujours. */

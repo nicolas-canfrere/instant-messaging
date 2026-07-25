@@ -104,7 +104,89 @@ final class ConversationMembershipTest extends TestCase
         self::assertTrue($group->isAdmin(UserId::fromString(self::ALICE)));
     }
 
+    /**
+     * Les evenements de CREATION sont draines avant de rendre l'agregat : les
+     * tests ci-dessus portent sur l'ajout et le retrait, pas sur la creation,
+     * qui a ses propres tests plus bas.
+     */
+    /**
+     * Creer une conversation EST un changement d'appartenance pour celui qu'on
+     * y met. Sans cet evenement, le destinataire n'apprend jamais que le fil
+     * existe : son JWT a ete emis avant, il ne couvre donc pas le topic, et le
+     * hub ne lui livrera pas non plus le premier message. Le topic personnel
+     * `/users/{id}/system` est le seul canal par lequel il peut l'apprendre.
+     */
+    public function testCreatingADirectNotifiesThePeerOnly(): void
+    {
+        $direct = Conversation::direct(
+            ConversationId::fromString(self::CONVERSATION),
+            UserId::fromString(self::ALICE),
+            UserId::fromString(self::BOB),
+            new \DateTimeImmutable('2026-07-25 09:00:00'),
+        );
+
+        $events = $direct->releaseEvents();
+
+        self::assertCount(1, $events, 'L initiateur n a pas a etre prevenu de ce qu il vient de faire.');
+        self::assertInstanceOf(MembershipChanged::class, $events[0]);
+        self::assertSame(self::BOB, $events[0]->userId->toString());
+        self::assertSame(MembershipChange::Joined, $events[0]->change);
+        self::assertSame(self::CONVERSATION, $events[0]->conversationId->toString());
+    }
+
+    public function testCreatingAGroupNotifiesEveryMemberButTheCreator(): void
+    {
+        $group = Conversation::group(
+            ConversationId::fromString(self::CONVERSATION),
+            'Equipe projet',
+            UserId::fromString(self::ALICE),
+            [UserId::fromString(self::BOB), UserId::fromString(self::CAROL)],
+            new \DateTimeImmutable('2026-07-25 09:00:00'),
+        );
+
+        $events = $group->releaseEvents();
+
+        self::assertCount(2, $events);
+
+        $notified = [];
+        foreach ($events as $event) {
+            self::assertInstanceOf(MembershipChanged::class, $event);
+            self::assertSame(MembershipChange::Joined, $event->change);
+
+            $notified[] = $event->userId->toString();
+        }
+
+        self::assertEqualsCanonicalizing([self::BOB, self::CAROL], $notified);
+        self::assertNotContains(self::ALICE, $notified);
+    }
+
+    /** Le createur qui se liste lui-meme ne doit pas recevoir d'evenement pour autant. */
+    public function testTheCreatorListedAmongMembersIsStillNotNotified(): void
+    {
+        $group = Conversation::group(
+            ConversationId::fromString(self::CONVERSATION),
+            'Equipe projet',
+            UserId::fromString(self::ALICE),
+            [UserId::fromString(self::ALICE), UserId::fromString(self::BOB)],
+            new \DateTimeImmutable('2026-07-25 09:00:00'),
+        );
+
+        $events = $group->releaseEvents();
+
+        self::assertCount(1, $events);
+        self::assertInstanceOf(MembershipChanged::class, $events[0]);
+        self::assertSame(self::BOB, $events[0]->userId->toString());
+    }
+
     private function group(): Conversation
+    {
+        $group = $this->newGroup();
+        $group->releaseEvents();
+
+        return $group;
+    }
+
+    private function newGroup(): Conversation
     {
         return Conversation::group(
             ConversationId::fromString(self::CONVERSATION),
