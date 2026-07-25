@@ -18,6 +18,33 @@ services:
     # this creates a service per class whose id is the fully-qualified class name
     App\:
         resource: '../src/'
+        exclude:
+            # `Domain/` ne contient que des entites, des value objects et des
+            # ports. Rien n'y est un service : un agregat se construit par ses
+            # constructeurs nommes, pas par le conteneur. Les laisser ici ferait
+            # echouer la compilation sur leurs constructeurs non publics — et,
+            # plus grave, laisserait croire qu'on peut les injecter.
+            - '../src/*/Domain/'
+            - '../src/Kernel.php'
 
-    # add more service definitions when explicit configuration is needed
-    # please note that last definitions always *replace* previous ones
+    # ---------------------------------------------------------------------
+    # Ports du domaine -> adaptateurs
+    #
+    # Exclure `Domain/` du resource ci-dessus supprime aussi l'alias implicite
+    # que Symfony cree entre une interface et son unique implementation. On le
+    # declare donc a la main. C'est de la ceremonie, mais elle donne la carte
+    # des adaptateurs en un coup d'oeil, et un port sans adaptateur echoue a la
+    # compilation du conteneur plutot qu'a l'execution.
+    # ---------------------------------------------------------------------
+    App\Shared\Domain\IdGeneratorInterface: '@App\Shared\Infrastructure\Id\UlidGenerator'
+    App\Shared\Application\Event\DomainEventCollectorInterface: '@App\Shared\Infrastructure\Event\InMemoryDomainEventCollector'
+
+    # CQS : deux bus distincts, nommes a l'injection, pour qu'un handler ne
+    # puisse pas se tromper de bus par inadvertance.
+    #
+    # Alias a argument nomme plutot que `bind` sous `_defaults` : un `bind` que
+    # personne ne consomme encore fait echouer la compilation, un alias inutilise
+    # est simplement ignore.
+    Symfony\Component\Messenger\MessageBusInterface $commandBus: '@command.bus'
+    Symfony\Component\Messenger\MessageBusInterface $queryBus: '@query.bus'
+    Symfony\Component\Messenger\MessageBusInterface $eventBus: '@event.bus'
