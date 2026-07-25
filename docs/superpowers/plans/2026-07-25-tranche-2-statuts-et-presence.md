@@ -41,14 +41,15 @@ Elles s'appliquent à **toutes** les tâches, sans être répétées dans chacun
 - **Portes de qualité vertes à chaque commit** : `make static-code-analysis`, `make check-cs`,
   `make deptrac`, `make test`, `make front-test`.
 
-## Prérequis à la charge de Nicolas
+## Prérequis
 
-Deux gestes, à faire **avant la tâche 1**. Signalés, non exécutés par l'agent (règle du CLAUDE.md :
-ni bootstrap, ni installation de paquets).
-
-1. Ajouter `"ext-redis": "*"` aux `require` de `backend/composer.json`.
-2. Valider la modification de `deptrac-contexts.yaml` prévue en tâche 7 (« la config deptrac se
-   décide à deux »). Le détail et sa justification sont dans la tâche 7, étape 1.
+1. ~~Ajouter `"ext-redis": "*"` aux `require` de `backend/composer.json`.~~ **Fait**, sur
+   autorisation explicite de Nicolas, via `make composer-req PACKAGES="ext-redis:*"`. Les
+   modifications de `backend/composer.json` et `backend/composer.lock` sont dans l'arbre de travail
+   et seront reprises par le commit de la tâche 1.
+2. **Valider la modification de `deptrac-contexts.yaml` prévue en tâche 7** — « la config deptrac se
+   décide à deux ». C'est une porte, pas un geste : ne pas modifier le fichier sans accord. Le détail
+   et sa justification sont dans la tâche 7, étape 1.
 
 ## Carte des fichiers
 
@@ -116,7 +117,7 @@ ni bootstrap, ni installation de paquets).
 
 - [ ] **Étape 1 : vérifier que `ext-redis` est bien déclarée**
 
-Prérequis de Nicolas. Sans elle, la suite échoue au `composer install`.
+Déjà ajoutée (voir *Prérequis*), mais la vérification reste : sans elle, `composer install` échoue.
 
 ```bash
 grep -n 'ext-redis' backend/composer.json
@@ -234,9 +235,13 @@ Attendu : six services, `redis` en `healthy`.
 - [ ] **Étape 8 : commit**
 
 ```bash
-git add backend/Dockerfile compose.yaml compose.test.yaml Makefile
+git add backend/Dockerfile backend/composer.json backend/composer.lock compose.yaml compose.test.yaml Makefile
 git commit -m "chore(infra): ajouter le conteneur redis pour la presence ephemere"
 ```
+
+> Le `composer.lock` porte aussi un réencodage cosmétique (`"stability-flags": []` → `{}`,
+> `"platform-dev": []` → `{}`) dû à la version de Composer du conteneur. Sans effet fonctionnel,
+> mentionné ici pour que la revue ne s'y arrête pas.
 
 ---
 
