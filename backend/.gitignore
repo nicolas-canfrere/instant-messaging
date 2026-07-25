@@ -1,3 +1,8 @@
+# Regenere a chaque `cache:warmup` a partir des bundles installes : le suivre
+# ne produit que du bruit dans les diffs. Il sert d'aide a la saisie pour les
+# fichiers de configuration, rien ne le lit a l'execution.
+# Deja exclu de PHPStan (`excludePaths` dans phpstan.dist.neon).
+/config/reference.php
 
 ###> symfony/framework-bundle ###
 /.env.local
