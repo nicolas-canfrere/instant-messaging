@@ -8,6 +8,7 @@ use App\Message\Application\Query\MessagePageReaderInterface;
 use App\Message\Application\Query\MessageView;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\MessageId;
+use App\Shared\Infrastructure\Persistence\DatabaseTimestamp;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 
@@ -16,7 +17,14 @@ use Doctrine\DBAL\ParameterType;
  *
  * Un OFFSET deviendrait faux des qu'un message arrive pendant la remontee — la
  * fenetre se decalerait et ferait sauter un element. Le curseur, lui, designe
- * une position absolue dans l'ordre, insensible aux insertions.
+ * une position absolue dans l'ordre : les messages PLUS RECENTS que le curseur
+ * n'affectent jamais les pages suivantes.
+ *
+ * Ce que le curseur ne couvre pas : l'ULID est frappe avant le commit, donc une
+ * transaction lente peut rendre visible un identifiant PLUS ANCIEN que le
+ * curseur deja servi. Ce message-la ne sera pas vu par la remontee. C'est
+ * pourquoi le front doit s'abonner au flux temps reel AVANT de charger
+ * l'historique : le SSE rattrape ce que la pagination ne peut pas voir.
  *
  * Deux requetes ecrites en entier plutot qu'une seule conditionnelle : chacune
  * se lit d'un bloc et son plan d'execution est evident.
@@ -67,7 +75,7 @@ final readonly class DbalMessagePageReader implements MessagePageReaderInterface
                 $row['sender_id'],
                 $row['content'],
                 $row['client_message_id'],
-                $row['created_at'],
+                DatabaseTimestamp::toAtom($row['created_at']),
             ),
             $rows,
         );

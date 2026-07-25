@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Message;
 
+use App\Message\Application\Query\GetMessagePageQueryHandler;
 use App\Shared\Domain\IdGeneratorInterface;
 use App\Tests\Functional\DatabaseTestCase;
 
@@ -78,20 +79,21 @@ final class MessagePaginationTest extends DatabaseTestCase
         self::assertNull($page['next_before']);
     }
 
-    /** La borne haute protege la base d'une demande demesuree. */
+    /**
+     * La borne haute protege la base d'une demande demesuree. Il faut plus de
+     * MAX_LIMIT messages pour que le plafond soit reellement observable :
+     * avec moins, retirer l'ecretage du handler laisserait le test au vert.
+     */
     public function testTheLimitIsCappedRatherThanRejected(): void
     {
         $this->login('alice');
         $conversationId = $this->firstConversationId();
 
-        $this->sendMany($conversationId, 3);
+        $this->sendMany($conversationId, GetMessagePageQueryHandler::MAX_LIMIT + 1);
 
-        $this->client->request(
-            'GET',
-            sprintf('/api/conversations/%s/messages?limit=100000', $conversationId),
-        );
+        $page = $this->fetchPage($conversationId, null, 100_000);
 
-        self::assertResponseIsSuccessful();
+        self::assertCount(GetMessagePageQueryHandler::MAX_LIMIT, $page['items']);
     }
 
     public function testAMalformedCursorIsRejected(): void
@@ -134,6 +136,11 @@ final class MessagePaginationTest extends DatabaseTestCase
                     \JSON_THROW_ON_ERROR,
                 ),
             );
+
+            // Sans cette assertion, un envoi refuse ressortirait plus loin en
+            // « undefined array key id », dans une aide de test plutot que la
+            // ou le probleme se trouve.
+            self::assertResponseStatusCodeSame(201);
 
             /** @var array{id: string} $body */
             $body = json_decode(
