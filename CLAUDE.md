@@ -88,9 +88,8 @@ vie de l'`EventSource`, dédup, restauration du scroll) et expliquer le *pourquo
 ## Qualité
 
 PHPStan **niveau 8**, PHP-CS-Fixer (`@Symfony` + `@PSR12`), deptrac (zéro violation).
-Les trois sont des **PHARs épinglés dans le Dockerfile backend**, pas des dépendances de
-`composer.json` : ils tirent leurs propres versions de composants Symfony et ne doivent pas
-contraindre celles de l'application. PHPUnit reste en `require-dev`.
+Les trois sont en **`require-dev`** dans `composer.json`, comme PHPUnit, et s'exécutent
+depuis `vendor/bin/` **dans le conteneur backend**.
 
 La CI lance `make qa` dans les mêmes conteneurs que le poste de dev — pas de `setup-php`.
 

@@ -198,24 +198,27 @@ docker run --rm -v "$PWD/backend:/app" -w /app composer:2 \
 Les `composer require` du bootstrap suivent le même schéma tant que le `Dockerfile` backend n'existe
 pas ; ensuite ils passent par `make composer`.
 
-#### Outils qualité : PHARs dans l'image, pas dans `composer.json`
+#### Outils qualité : en `require-dev`
 
-PHPStan, PHP-CS-Fixer et deptrac tirent chacun leurs propres versions de composants Symfony. Les mettre
-en `require-dev` de l'application crée des conflits de contraintes, et pire, **fait dépendre les
-versions de l'application de celles de ses outils d'analyse**.
+**Décision** : PHPStan, PHP-CS-Fixer et deptrac sont des dépendances `require-dev` de l'application,
+au même titre que PHPUnit. Ils s'exécutent depuis `vendor/bin/`, dans le conteneur backend.
 
-**Décision** : les trois sont installés en **PHAR, à version épinglée, dans le `Dockerfile` du
-backend**. Ils vivent dans l'image, pas dans `composer.json`. L'application n'a alors aucune dépendance
-de développement liée à la qualité, et les mises à jour d'outillage se font en un point unique.
-
-| Outil | Rôle | Seuil |
+| Outil | Paquet | Seuil |
 |---|---|---|
-| PHPStan | analyse statique | **niveau 8**, échec du build en dessous |
-| PHP-CS-Fixer | style | règles `@Symfony` + `@PSR12`, mode `--dry-run` en CI |
-| deptrac | règle de dépendance de l'hexagone | zéro violation tolérée (section 3.8) |
+| PHPStan | `phpstan/phpstan` (+ `phpstan/phpstan-symfony`) | **niveau 8**, échec du build en dessous |
+| PHP-CS-Fixer | `friendsofphp/php-cs-fixer` | `@Symfony` + `@PSR12`, `--dry-run` en CI |
+| deptrac | `qossmic/deptrac` | zéro violation tolérée (section 3.8) |
 
-PHPUnit reste, lui, en `require-dev` : c'est une dépendance légitime du code de test, pas un outil
-d'analyse externe.
+L'objection classique — « ces outils tirent leurs propres versions de composants Symfony et contraignent
+celles de l'application » — ne tient plus : `phpstan/phpstan` et `qossmic/deptrac` sont distribués en
+PHAR scopé, sans dépendances. Seul PHP-CS-Fixer tire encore des composants Symfony, avec des contraintes
+assez larges pour ne pas gêner.
+
+Le bénéfice : les versions d'outillage sont dans `composer.lock`, versionnées et reproductibles avec le
+reste, plutôt que dans une couche d'image Docker à maintenir séparément.
+
+*Si* PHP-CS-Fixer venait un jour à bloquer une montée de version de Symfony, la sortie de secours est
+`bamarni/composer-bin-plugin` (vendor isolé pour cet outil seul) — pas une refonte de l'outillage.
 
 ---
 
