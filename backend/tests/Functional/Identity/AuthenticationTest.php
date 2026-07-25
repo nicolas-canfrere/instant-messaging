@@ -14,6 +14,7 @@ final class AuthenticationTest extends DatabaseTestCase
 
         self::assertResponseStatusCodeSame(401);
         self::assertResponseHeaderSame('Content-Type', 'application/problem+json');
+        self::assertSame('/problems/authentication-required', $this->problem()['type']);
     }
 
     public function testLoginThenMeReturnsTheCurrentUser(): void
@@ -43,6 +44,14 @@ final class AuthenticationTest extends DatabaseTestCase
 
         self::assertResponseStatusCodeSame(401);
         self::assertResponseHeaderSame('Content-Type', 'application/problem+json');
+
+        $problem = $this->problem();
+
+        self::assertSame('/problems/invalid-credentials', $problem['type']);
+        // Le detail ne dit jamais laquelle des deux valeurs est fausse : ce
+        // serait un oracle pour enumerer les comptes existants.
+        self::assertIsString($problem['detail']);
+        self::assertStringNotContainsString('alice', $problem['detail']);
     }
 
     /** L'annuaire sert a choisir un interlocuteur, pas a exposer les comptes. */
@@ -82,5 +91,19 @@ final class AuthenticationTest extends DatabaseTestCase
         );
 
         self::assertResponseIsSuccessful();
+    }
+
+    /** @return array<string, mixed> */
+    private function problem(): array
+    {
+        /** @var array<string, mixed> $problem */
+        $problem = json_decode(
+            (string) $this->client->getResponse()->getContent(),
+            true,
+            512,
+            \JSON_THROW_ON_ERROR,
+        );
+
+        return $problem;
     }
 }
