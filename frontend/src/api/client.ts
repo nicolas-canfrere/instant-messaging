@@ -1,6 +1,7 @@
 import { toProblemError } from './problem';
 import type {
   ApiMessage,
+  ConversationDetail,
   ConversationSummary,
   Me,
   MessagePageResponse,
@@ -41,6 +42,9 @@ export const api = {
   users: () => request<UserSummary[]>('/api/users'),
 
   conversations: () => request<ConversationSummary[]>('/api/conversations'),
+
+  conversation: (conversationId: string) =>
+    request<ConversationDetail>(`/api/conversations/${conversationId}`),
 
   messages: (conversationId: string, before?: string) => {
     const query = new URLSearchParams({ limit: '50' });
