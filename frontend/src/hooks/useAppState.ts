@@ -12,6 +12,8 @@ import {
   type MessagesState,
   type StoredMessage,
 } from '../store/messagesReducer';
+import { emptyPresenceState, presenceReducer } from '../store/presenceReducer';
+import { useHeartbeat } from './useHeartbeat';
 
 /**
  * Un message d'historique est deja accepte par le serveur : son statut est
@@ -151,6 +153,7 @@ export type AppState = {
   conversations: ConversationSummary[];
   selectedId: string | null;
   messagesState: MessagesState;
+  onlineUserIds: Set<string>;
   selectConversation: (conversationId: string) => void;
   loadOlder: () => void;
   refreshConversations: () => Promise<void>;
@@ -165,6 +168,11 @@ export function useAppState(me: Me): AppState {
   const [peers, setPeers] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messagesState, dispatch] = useReducer(messagesReducer, undefined, emptyMessagesState);
+  const [presenceState, dispatchPresence] = useReducer(
+    presenceReducer,
+    undefined,
+    emptyPresenceState,
+  );
 
   const clientRef = useRef<RealtimeClient | null>(null);
   /**
@@ -453,6 +461,14 @@ export function useAppState(me: Me): AppState {
     };
   }, [refreshConversations]);
 
+  // `useCallback([])` : `dispatchPresence` est stable, le hook ne doit donc pas
+  // se remonter a chaque rendu — sinon le battement repartirait de zero.
+  const onOnlineUserIds = useCallback((ids: string[]) => {
+    dispatchPresence({ type: 'presence/refreshed', onlineUserIds: ids });
+  }, []);
+
+  useHeartbeat(onOnlineUserIds);
+
   return {
     me,
     users,
@@ -460,6 +476,7 @@ export function useAppState(me: Me): AppState {
     conversations,
     selectedId,
     messagesState,
+    onlineUserIds: presenceState.onlineUserIds,
     selectConversation,
     loadOlder,
     refreshConversations,

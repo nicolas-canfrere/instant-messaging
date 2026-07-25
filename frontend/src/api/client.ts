@@ -3,6 +3,7 @@ import type {
   ApiMessage,
   ConversationDetail,
   ConversationSummary,
+  HeartbeatResponse,
   Me,
   MessagePageResponse,
   RealtimeToken,
@@ -78,6 +79,8 @@ export const api = {
     }),
 
   realtimeToken: () => request<RealtimeToken>('/api/realtime/token'),
+
+  heartbeat: () => request<HeartbeatResponse>('/api/presence/heartbeat', { method: 'POST' }),
 };
 
 export type { ApiMessage };

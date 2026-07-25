@@ -37,3 +37,5 @@ export type ApiMessage = {
 export type MessagePageResponse = { items: ApiMessage[]; next_before: string | null };
 
 export type RealtimeToken = { hub_url: string; topics: string[] };
+
+export type HeartbeatResponse = { online_user_ids: string[] };

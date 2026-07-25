@@ -62,6 +62,7 @@ function Workspace({ me }: { me: Me }) {
     conversations,
     selectedId,
     messagesState,
+    onlineUserIds,
     selectConversation,
     loadOlder,
     send,
@@ -81,6 +82,7 @@ function Workspace({ me }: { me: Me }) {
         conversations={conversations}
         users={users}
         peers={peers}
+        onlineUserIds={onlineUserIds}
         selectedId={selectedId}
         onSelect={selectConversation}
         onNewConversation={() => setCreating(true)}
