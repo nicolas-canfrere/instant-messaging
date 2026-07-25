@@ -101,6 +101,7 @@ functional-test: test-down ## Run functional tests. Usage: make functional-test 
 	@$(DOCKER_COMPOSE_TEST) up -d --wait postgres-test
 	@$(DOCKER_COMPOSE_TEST_RUN) backend-test sh -c "php bin/console doctrine:database:create --if-not-exists -n -q \
 	&& php bin/console doctrine:migrations:migrate -n -q --allow-no-migration \
+	&& php bin/console app:fixtures:load -q \
 	&& php vendor/bin/phpunit --testsuite=Functional --stop-on-error --stop-on-failure $(ARGS)" ; \
 	CODE=$$? ; \
 	$(MAKE) --no-print-directory test-down ; \

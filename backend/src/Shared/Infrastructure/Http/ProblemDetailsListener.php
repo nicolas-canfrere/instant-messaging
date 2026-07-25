@@ -17,6 +17,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Messenger\Exception\HandlerFailedException;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 use Symfony\Component\Security\Core\Exception\AuthenticationException;
+use Symfony\Component\Security\Core\Exception\BadCredentialsException;
 
 /**
  * Seul endroit du projet ou une exception rencontre HTTP.
@@ -58,7 +59,15 @@ final readonly class ProblemDetailsListener
         ));
     }
 
-    /** Messenger encapsule les exceptions des handlers : il faut retrouver la cause reelle. */
+    /**
+     * Retrouve la cause reelle sous les emballages des composants.
+     *
+     * Messenger encapsule les exceptions de ses handlers dans une
+     * HandlerFailedException. Et le listener de securite, faute d'entry point
+     * configure, emballe les exceptions d'authentification et d'autorisation
+     * dans une HttpException : sans ce deballage, tout 401 ressortirait en
+     * `/problems/http-error` au lieu de dire ce qui s'est reellement passe.
+     */
     private function unwrap(\Throwable $throwable): \Throwable
     {
         while ($throwable instanceof HandlerFailedException) {
@@ -71,6 +80,14 @@ final readonly class ProblemDetailsListener
             $throwable = $previous;
         }
 
+        $previous = $throwable->getPrevious();
+
+        if ($throwable instanceof HttpExceptionInterface
+            && ($previous instanceof AuthenticationException || $previous instanceof AccessDeniedException)
+        ) {
+            return $previous;
+        }
+
         return $throwable;
     }
 
@@ -78,6 +95,16 @@ final readonly class ProblemDetailsListener
     private function describe(\Throwable $throwable): array
     {
         return match (true) {
+            // Avant AuthenticationException, dont elle herite. Le detail ne dit
+            // jamais laquelle des deux valeurs est fausse : Symfony masque deja
+            // « utilisateur inconnu » en « identifiants invalides », et le dire
+            // ici donnerait un oracle pour enumerer les comptes.
+            $throwable instanceof BadCredentialsException => [
+                Response::HTTP_UNAUTHORIZED,
+                '/problems/invalid-credentials',
+                'Identifiants invalides',
+                'Le nom d\'utilisateur ou le mot de passe est incorrect.',
+            ],
             $throwable instanceof AuthenticationException => [
                 Response::HTTP_UNAUTHORIZED,
                 '/problems/authentication-required',
