@@ -666,9 +666,29 @@ toujours par être activé en production un jour de panne.
 
 #### Forme
 
-- **Logs structurés** : message court et constant, variables dans le tableau de contexte
-  (`$logger->info('Message sent', ['message_id' => …, 'conversation_id' => …])`), jamais interpolées
-  dans la chaîne. C'est ce qui rend les logs cherchables et agrégeables.
+- **Placeholders PSR-3 entre accolades, variables dans le second argument.** Le message reste une
+  chaîne littérale constante ; les valeurs vivent dans le tableau de contexte, et les clés du contexte
+  correspondent aux accolades du message
+  (<https://symfony.com/doc/current/logging.html#logging-a-message>).
+
+  ```php
+  // Attendu
+  $logger->info('Message {message_id} envoyé dans la conversation {conversation_id}', [
+      'message_id' => (string) $messageId,
+      'conversation_id' => (string) $conversationId,
+  ]);
+
+  // Interdit
+  $logger->info(sprintf('Message %s envoyé dans la conversation %s', $messageId, $conversationId));
+  $logger->info("Message {$messageId} envoyé…");
+  $logger->info('Message envoyé : ' . $messageId);
+  ```
+
+  Trois raisons, dans l'ordre d'importance : le message devient une **clé stable** sur laquelle grouper
+  et alerter (avec `sprintf`, chaque ligne est unique et l'agrégation est impossible) ; les valeurs
+  restent des **champs exploitables** au lieu d'être noyées dans une phrase ; et un formateur peut
+  décider de ne pas interpoler du tout. Corollaire : **toute valeur dynamique va dans le contexte**, y
+  compris celles qui n'ont pas d'accolade correspondante dans le message.
 - **Un canal Monolog par contexte** : `identity`, `conversation`, `message`, `realtime`.
 - **Un identifiant de corrélation par requête HTTP**, propagé dans le contexte de toutes les lignes
   qu'elle produit — indispensable pour reconstituer un envoi de message de bout en bout.

@@ -112,9 +112,21 @@ valide sa longueur), pas dans le contrôleur. Les topics Mercure se construisent
 passe même haché, un e-mail complet. On loggue des **identifiants**, jamais des charges
 utiles — y compris en `debug`.
 
-Logs **structurés** : message court et constant, variables dans le contexte, jamais
-interpolées. Un canal Monolog par contexte. Un identifiant de corrélation par requête. Une
-erreur se loggue **une seule fois**, à la frontière qui la traite.
+**Placeholders `{entre_accolades}`, variables dans le second argument.** Jamais de
+`sprintf`, jamais d'interpolation `"{$var}"`, jamais de concaténation.
+
+```php
+$logger->info('Message {message_id} envoyé dans la conversation {conversation_id}', [
+    'message_id' => (string) $messageId,
+    'conversation_id' => (string) $conversationId,
+]);
+```
+
+Le message doit rester une chaîne littérale constante : c'est la clé sur laquelle on groupe
+et on alerte. Toute valeur dynamique va dans le contexte, même sans accolade correspondante.
+
+Un canal Monolog par contexte. Un identifiant de corrélation par requête. Une erreur se
+loggue **une seule fois**, à la frontière qui la traite.
 
 ### Domain events
 
