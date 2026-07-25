@@ -69,6 +69,28 @@ final class MessagePaginationTest extends DatabaseTestCase
         self::assertNull($page['next_before']);
     }
 
+    /**
+     * Le cas limite : le nombre de messages tombe pile sur un multiple de la
+     * limite. Deduire « il reste quelque chose » du seul fait que la page est
+     * pleine annoncerait ici un curseur qui ne ramenerait rien — un « charger
+     * plus » vide dans le front, et un aller-retour paye pour rien.
+     */
+    public function testAFullPageThatExhaustsTheHistoryHasNoCursor(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+
+        $this->sendMany($conversationId, 10);
+
+        $page = $this->fetchPage($conversationId, null, 5);
+        self::assertCount(5, $page['items']);
+        self::assertNotNull($page['next_before'], 'Il reste cinq messages plus anciens.');
+
+        $lastPage = $this->fetchPage($conversationId, $page['next_before'], 5);
+        self::assertCount(5, $lastPage['items']);
+        self::assertNull($lastPage['next_before'], 'Page pleine, mais plus rien derriere.');
+    }
+
     public function testAnEmptyConversationYieldsAnEmptyPage(): void
     {
         $this->login('alice');

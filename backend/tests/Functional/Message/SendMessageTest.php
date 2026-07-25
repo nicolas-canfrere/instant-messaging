@@ -226,6 +226,10 @@ final class SendMessageTest extends DatabaseTestCase
             \JSON_THROW_ON_ERROR,
         );
 
+        // Sans cette assertion, une regression de publication ferait mourir le
+        // test sur « undefined array key 0 » plutot que sur le contrat teste.
+        self::assertCount(1, $published);
+
         self::assertSame($published[0]['payload']['created_at'], $page['items'][0]['created_at']);
         self::assertMatchesRegularExpression(
             '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/',

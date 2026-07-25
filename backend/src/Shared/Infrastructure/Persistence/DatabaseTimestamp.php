@@ -29,7 +29,14 @@ final class DatabaseTimestamp
             return null;
         }
 
+        // Le decalage rendu par PostgreSQL est celui du fuseau de SESSION, pas
+        // celui du stockage. Sans normalisation, une base reglee ailleurs qu'en
+        // UTC ferait sortir le meme instant en « +02:00 » ici et en « +00:00 »
+        // dans la charge utile Mercure — deux chaines pour un seul instant, que
+        // le front compare telles quelles.
         /** @var non-empty-string */
-        return (new \DateTimeImmutable($value))->format(\DateTimeInterface::ATOM);
+        return (new \DateTimeImmutable($value))
+            ->setTimezone(new \DateTimeZone('UTC'))
+            ->format(\DateTimeInterface::ATOM);
     }
 }

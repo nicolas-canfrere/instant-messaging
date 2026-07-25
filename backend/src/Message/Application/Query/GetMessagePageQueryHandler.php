@@ -33,11 +33,17 @@ final readonly class GetMessagePageQueryHandler implements QueryHandlerInterface
         // client, pas une requete invalide.
         $limit = max(1, min($query->limit, self::MAX_LIMIT));
 
-        $items = $this->messages->page($query->conversationId, $query->before, $limit);
+        // Une ligne de plus que demande : sa presence PROUVE qu'il reste des
+        // messages plus anciens. Deduire cela de « la page est pleine » serait
+        // faux quand le total tombe pile sur un multiple de la limite — on
+        // annoncerait un curseur qui ne ramenerait rien.
+        $rows = $this->messages->page($query->conversationId, $query->before, $limit + 1);
 
-        // Page pleine : il reste potentiellement des messages plus anciens.
-        // Une page incomplete prouve qu'on a atteint le fond.
-        $nextBefore = count($items) === $limit ? $items[count($items) - 1]->id : null;
+        $hasMore = count($rows) > $limit;
+        $items = array_slice($rows, 0, $limit);
+
+        $oldest = $items[count($items) - 1] ?? null;
+        $nextBefore = $hasMore && null !== $oldest ? $oldest->id : null;
 
         return new MessagePage($items, $nextBefore);
     }
