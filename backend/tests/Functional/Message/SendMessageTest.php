@@ -86,6 +86,32 @@ final class SendMessageTest extends DatabaseTestCase
         self::assertSame(sprintf('/conversations/%s', $conversationId), $created[0]['topic']);
     }
 
+    /**
+     * L'echo SSE part APRES le commit mais AVANT que la reponse du POST ne
+     * revienne au navigateur. Sans `client_message_id` dans la charge utile,
+     * la premiere passe de dedup du front ne peut pas reconnaitre l'envoi
+     * optimiste : elle ajoute un second item, que la reponse HTTP dote ensuite
+     * du meme `id` serveur que le premier. Deux items identiques, definitifs.
+     */
+    public function testThePublishedPayloadCarriesTheClientMessageId(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+
+        $publisher = static::getContainer()->get(InMemoryEventPublisher::class);
+
+        $this->send($conversationId, self::CLIENT_ID, 'bonjour');
+
+        $created = array_values(array_filter(
+            $publisher->published(),
+            static fn(array $entry): bool => 'message.created' === $entry['type'],
+        ));
+
+        self::assertCount(1, $created);
+        self::assertArrayHasKey('client_message_id', $created[0]['payload']);
+        self::assertSame(self::CLIENT_ID, $created[0]['payload']['client_message_id']);
+    }
+
     /** La choregraphie : Conversation met a jour son propre pointeur. */
     public function testSendingAMessageUpdatesTheConversationPreview(): void
     {
