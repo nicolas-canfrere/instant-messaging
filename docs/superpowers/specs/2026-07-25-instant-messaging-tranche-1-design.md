@@ -752,6 +752,70 @@ routes `/conversations/{id}/*`. Il délègue à un service d'appartenance du con
 Mercure. Une divergence entre « qui peut lire l'API » et « qui peut s'abonner au topic » serait une
 faille — elle est structurellement impossible ici.
 
+### Format d'erreur : RFC 7807
+
+**Toute** réponse d'erreur de l'API est un *Problem Details*, avec l'en-tête
+`Content-Type: application/problem+json`. Aucune exception : pas de `{"error": "..."}` ad hoc, pas de
+page HTML d'erreur Symfony qui fuirait sur une route `/api`.
+
+> RFC 7807 est formellement remplacée par la **RFC 9457**, qui la clarifie sans rien casser. Le format
+> ci-dessous est valide pour les deux.
+
+#### Membres
+
+| Membre | Obligatoire | Contenu |
+|---|---|---|
+| `type` | oui | URI stable identifiant **la classe** de problème, ex. `/problems/conversation-not-found`. `about:blank` pour une erreur HTTP générique |
+| `title` | oui | libellé court, **constant pour un `type` donné** — jamais de valeur variable dedans |
+| `status` | oui | code HTTP, dupliqué dans le corps |
+| `detail` | recommandé | explication de **cette occurrence**, lisible par un humain |
+| `instance` | oui | chemin de la requête |
+| `correlation_id` | oui *(extension)* | identifiant de corrélation de la requête — **le même que dans les logs** (section 3.11) |
+
+Le `correlation_id` est le détail qui rend le reste utile : un utilisateur signale une erreur, colle la
+réponse, et la trace complète est retrouvable dans les logs sans chercher.
+
+`type` et `title` sont constants et groupables ; `detail` porte le variable. C'est exactement la même
+discipline que les placeholders de log (section 3.11), appliquée aux réponses HTTP.
+
+#### Catalogue de la tranche 1
+
+| `type` | Statut | Cas |
+|---|---|---|
+| `/problems/malformed-request` | 400 | JSON illisible, corps absent |
+| `/problems/authentication-required` | 401 | pas de session valide |
+| `/problems/access-denied` | 403 | authentifié, membre, mais **rôle insuffisant** (non-admin voulant gérer les membres) |
+| `/problems/resource-not-found` | 404 | ressource inexistante **ou non accessible** — voir ci-dessous |
+| `/problems/validation-failed` | 422 | charge utile bien formée mais invalide (contenu vide, ULID mal formé) — extension `errors` : champ → messages |
+| `/problems/internal-error` | 500 | tout le reste. `detail` **générique**, jamais de message d'exception ni de fragment SQL |
+
+#### Décision : 404 plutôt que 403 pour un non-membre
+
+Répondre 403 sur une conversation dont on n'est pas membre **confirme qu'elle existe**. En itérant sur
+des identifiants, on énumère les conversations du système — un oracle d'existence.
+
+**Règle retenue :**
+
+- **non-membre → 404**, indistinguable d'un identifiant inexistant ;
+- **403 uniquement quand l'appartenance est déjà établie** et que seul le rôle manque. Le 403 ne révèle
+  alors rien que l'appelant ne sache déjà.
+
+Les identifiants étant des ULID (non séquentiels), l'énumération est déjà peu praticable — mais faire
+reposer une propriété de sécurité sur la difficulté de deviner un identifiant est un pari, pas une
+décision. Un test fonctionnel verrouille les deux cas.
+
+#### Mise en œuvre
+
+Un listener d'exception dans `Shared/Infrastructure` traduit les exceptions en Problem Details. Il porte
+**seul** la table de correspondance exception → statut HTTP.
+
+C'est structurellement obligatoire : les exceptions de `Domain` ont zéro dépendance (section 3.5) et
+ignorent donc totalement HTTP. `EmptyMessageContentException` ne sait pas qu'elle vaut 422 — c'est
+l'adaptateur qui le décide. La couche de traduction est le seul endroit où le domaine rencontre le
+protocole.
+
+Le listener loggue l'erreur **une fois** (section 3.11) et attache le `correlation_id` à la réponse.
+
 ---
 
 ## Section 5 — Topics Mercure & autorisation
@@ -892,7 +956,9 @@ plus que les adaptateurs.
 
 ### Backend — fonctionnels (`WebTestCase`, base de test, rollback par test)
 
-Chaque endpoint sur trois axes : cas nominal, non authentifié (401), non-membre (403). Plus les
+Chaque endpoint sur trois axes : cas nominal, non authentifié (401), **non-membre (404, pas 403** —
+section 4). Chaque réponse d'erreur est vérifiée comme un Problem Details valide : en-tête
+`application/problem+json`, membres obligatoires présents, `type` conforme au catalogue. Plus les
 scénarios qui portent la valeur :
 
 - rejouer le même `POST /messages` → **200**, même `id`, **une seule** publication Mercure ;
@@ -900,7 +966,10 @@ scénarios qui portent la valeur :
 - pagination keyset : 120 messages, remontée par pages de 50, ni trou ni doublon **même quand un
   message est inséré entre deux pages** ;
 - ajouter un membre → `membership.changed` publié sur `/users/{id}/system` du **nouveau** membre ;
-- publication **après commit** : un handler qui échoue après l'insert ne publie rien.
+- publication **après commit** : un handler qui échoue après l'insert ne publie rien ;
+- **pas d'oracle d'existence** : une conversation existante dont on n'est pas membre et un identifiant
+  totalement inconnu renvoient des réponses **indistinguables** (même statut, même `type`, même
+  `title`).
 
 `EventPublisher` est remplacé par un espion en mémoire : on assert le topic **et** la charge utile.
 **Aucun hub Mercure n'est nécessaire en CI.**

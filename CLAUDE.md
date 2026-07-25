@@ -134,6 +134,28 @@ Enregistrés sur l'agrégat, dispatchés **après le commit** par le middleware 
 du `command.bus`. Publier dans la transaction pousserait aux clients des messages qu'un
 rollback ferait disparaître.
 
+## Erreurs de l'API
+
+**Toute** réponse d'erreur est un *Problem Details* RFC 7807, en-tête
+`application/problem+json`. Jamais de `{"error": "..."}` ad hoc ni de page HTML Symfony sur
+une route `/api`.
+
+Membres : `type` (URI stable de la classe de problème), `title` (constant pour un `type`),
+`status`, `detail` (spécifique à l'occurrence), `instance`, et l'extension
+`correlation_id` — **le même identifiant que dans les logs**.
+
+`type`/`title` constants et groupables, `detail` variable. Même discipline que les
+placeholders de log.
+
+**404, pas 403, pour un non-membre** : un 403 confirmerait l'existence de la conversation
+(oracle d'énumération). Le 403 est réservé au cas où l'appartenance est établie et où seul le
+rôle manque.
+
+En 500 : `detail` générique, jamais de message d'exception ni de fragment SQL.
+
+La traduction exception → statut HTTP vit **uniquement** dans le listener de
+`Shared/Infrastructure`. Les exceptions de `Domain` ignorent HTTP.
+
 ## Frontend
 
 React + TypeScript + Vite + Tailwind. La logique vit **hors de React** :
