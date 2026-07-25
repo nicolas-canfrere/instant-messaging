@@ -7,6 +7,7 @@ type Props = {
   peers: Record<string, string>;
   selectedId: string | null;
   onSelect: (conversationId: string) => void;
+  onNewConversation: () => void;
 };
 
 /**
@@ -14,12 +15,34 @@ type Props = {
  * decide rien, il affiche ce qu'on lui passe et remonte le clic. Toute la
  * logique (chargement, resolution des noms) vit dans `useAppState`.
  */
-export function ConversationList({ conversations, users, peers, selectedId, onSelect }: Props) {
+export function ConversationList({
+  conversations,
+  users,
+  peers,
+  selectedId,
+  onSelect,
+  onNewConversation,
+}: Props) {
   return (
     <nav className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white">
-      <h2 className="px-4 py-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-        Conversations
-      </h2>
+      <div className="flex items-center justify-between px-4 py-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Conversations
+        </h2>
+
+        {/*
+          Le composant reste bete : il ne cree rien, il signale l'intention.
+          C'est `Workspace` qui ouvre le dialogue et `useAppState` qui cree.
+        */}
+        <button
+          type="button"
+          onClick={onNewConversation}
+          aria-label="Nouvelle conversation"
+          className="rounded border border-slate-300 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50"
+        >
+          +
+        </button>
+      </div>
 
       {conversations.length === 0 && (
         <p className="px-4 py-2 text-sm text-slate-400">Aucune conversation.</p>
