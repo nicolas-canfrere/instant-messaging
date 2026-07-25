@@ -91,8 +91,7 @@ dépendrait de `Message`. Un événement qu'un seul contexte écoute reste chez 
 **Modifier un `*View` ou la charge utile d'un événement partagé est un changement cassant.**
 
 Deux fichiers deptrac : `deptrac.yaml` (dimension technique) et `deptrac-contexts.yaml`
-(dimension contexte + allowlist vers les couches `*Contract`). Les deux tournent dans
-`make qa`.
+(dimension contexte + allowlist vers les couches `*Contract`). `make deptrac` lance les deux.
 
 ### Persistance : DBAL, jamais l'ORM
 
@@ -287,7 +286,8 @@ Niveau `max` : annoter les génériques (`@return list<MessageView>`), typer pr�
 lignes DBAL (`array{id: string, …}`), aucun `mixed` implicite. Les mappers sont la frontière
 désignée où le tableau brut devient un type précis.
 
-La CI lance `make qa` dans les mêmes conteneurs que le poste de dev — pas de `setup-php`.
+Les portes de qualité : `make static-code-analysis` · `make check-cs` · `make deptrac` ·
+`make test`. Les quatre doivent être vertes avant chaque commit.
 
 ## Commandes
 
