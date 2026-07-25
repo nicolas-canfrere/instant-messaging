@@ -1,0 +1,22 @@
+parameters:
+    level: max
+    paths:
+        - bin/
+        - config/
+        - public/
+        - src/
+        - tests/
+
+    excludePaths:
+        - tests/bootstrap.php
+        - config/reference.php
+
+    symfony:
+        containerXmlPath: var/cache/test/App_KernelTestDebugContainer.xml
+
+    scanFiles:
+        - vendor/symfony/dependency-injection/Loader/Configurator/ContainerConfigurator.php
+
+includes:
+    - vendor/phpstan/phpstan-symfony/extension.neon
+    - vendor/phpstan/phpstan-phpunit/extension.neon
