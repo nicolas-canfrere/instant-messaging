@@ -28,7 +28,8 @@ Les 17 notes du vault représentent plusieurs projets. Découpage retenu :
 |---|---|
 | Backend | Symfony 7 / PHP 8.4, **contrôleurs manuels** (pas d'API Platform : on veut voir le code, pas la config) |
 | Architecture backend | **Hexagonale par contexte + CQS**, value objects systématiques (section 3) |
-| Frontend | React + TypeScript, Vite, CSS Modules |
+| Frontend | React + TypeScript, Vite, **Tailwind CSS** |
+| Versionnement | **Monorepo**, un seul dépôt git (section 1.5) |
 | Base | PostgreSQL 17 |
 | Temps réel | Mercure (hub `dunglas/mercure`), SSE |
 | Auth T1 | Login local (session Symfony), **conçue pour accueillir OAuth sans refonte** |
@@ -96,6 +97,29 @@ instant-messaging/
 │   └── mercure/
 └── docs/superpowers/specs/
 ```
+
+### 1.5 Versionnement : un seul dépôt
+
+**Monorepo.** Décision déjà posée par [[Organisation du code (repo local)]] et
+[[Monorepo vs polyrepo (en équipe)]] ; la tranche 1 la confirme.
+
+**Submodules git écartés.** Séparer `backend/` et `frontend/` en dépôts référencés par le parent
+coûterait :
+
+- tout changement de contrat front/back (un champ de message, un nouvel événement temps réel) passerait
+  de une PR atomique à **trois commits dans trois dépôts** ;
+- un submodule pointe un commit figé, pas une branche → oubli de bump et `clone` sans `--recursive`
+  produisent un front qui parle à une API périmée, sans message d'erreur explicite ;
+- objectif portfolio : un `git clone` suivi de `make up` doit suffire.
+
+**Monorepo ≠ monolithe.** Backend, frontend et hub restent des services déployés indépendamment dans le
+`docker-compose`. Organisation du code et architecture d'exécution sont deux axes distincts. Un split
+se justifiera quand une couture stable aura son propre cycle de vie — service média (T4), client mobile
+— pas avant.
+
+**Hygiène de dépôt en T1** (utile en solo, indispensable si le projet s'ouvre) : commits conventionnels,
+CI par chemin (`backend/**` ne déclenche pas `vitest`), branches courtes. `CODEOWNERS` et la branch
+protection viendront s'il y a des contributeurs — inutiles en solo.
 
 ---
 
@@ -474,8 +498,12 @@ appelant une fonction.
 « nouvelle conversation » (choix d'un ou plusieurs users → direct ou groupe), panneau membres pour les
 groupes.
 
-**Styles** : CSS Modules + fichier de tokens (couleurs, espacements, typo). Pas de librairie UI : sur
+**Styles** : **Tailwind CSS**, avec les tokens du projet (palette, espacements, typo) déclarés dans
+`tailwind.config.ts` plutôt qu'en classes arbitraires dispersées. Pas de librairie de composants : sur
 un portfolio, un chat sobre écrit à la main démontre plus qu'un assemblage de composants tiers.
+
+Deux endroits où Tailwind seul ne suffira pas et où on écrira du CSS explicite : la zone scrollable de
+l'historique (`overflow-anchor`, restauration de scroll) et les transitions d'apparition des messages.
 
 ### Deux points délicats identifiés d'avance
 
