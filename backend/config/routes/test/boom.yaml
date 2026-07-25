@@ -1,0 +1,6 @@
+# Charge uniquement en environnement de test : Symfony importe
+# `config/routes/{environment}/` en plus de `config/routes/`.
+test_boom:
+    path: /api/_test/boom
+    controller: App\Shared\Infrastructure\Http\BoomController
+    methods: [GET]
