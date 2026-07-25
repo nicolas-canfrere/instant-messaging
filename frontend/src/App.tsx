@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from './api/client';
 import type { Me } from './api/types';
+import { useAppState } from './hooks/useAppState';
+import { selectThread } from './store/messagesReducer';
+import { ConversationList } from './ui/ConversationList';
+import { ConversationView } from './ui/ConversationView';
 import { LoginScreen } from './ui/LoginScreen';
 
 // Trois etats et non deux : tant que /api/me n'a pas repondu, on ne SAIT pas si
@@ -41,12 +45,45 @@ export default function App() {
     return <LoginScreen onAuthenticated={(me) => setSession({ state: 'authenticated', me })} />;
   }
 
-  // Placeholder assume : la liste de conversations et le fil de messages
-  // arrivent a la tache 16 du plan. On ne les anticipe pas ici.
+  return <Workspace me={session.me} />;
+}
+
+/**
+ * Composant separe et non un simple bloc de `App` : `useAppState` ouvre le flux
+ * temps reel, or les hooks ne peuvent pas etre appeles conditionnellement. Le
+ * monter seulement une fois authentifie garantit qu'aucun EventSource n'est
+ * ouvert avant que la session soit connue.
+ */
+function Workspace({ me }: { me: Me }) {
+  const { users, peers, conversations, selectedId, messagesState, selectConversation, loadOlder } =
+    useAppState(me);
+
+  const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null;
+
   return (
-    <main className="mx-auto mt-24 w-80 text-center">
-      <h1 className="text-xl font-semibold">Instant Messaging</h1>
-      <p className="mt-2 text-slate-600">Connecte en tant que {session.me.display_name}.</p>
-    </main>
+    <div className="flex h-screen text-slate-900">
+      <ConversationList
+        conversations={conversations}
+        users={users}
+        peers={peers}
+        selectedId={selectedId}
+        onSelect={selectConversation}
+      />
+
+      {selected === null ? (
+        <main className="flex flex-1 items-center justify-center bg-slate-50 text-slate-400">
+          Choisissez une conversation.
+        </main>
+      ) : (
+        <ConversationView
+          conversation={selected}
+          thread={selectThread(messagesState, selected.id)}
+          users={users}
+          peers={peers}
+          meId={me.id}
+          onLoadOlder={loadOlder}
+        />
+      )}
+    </div>
   );
 }

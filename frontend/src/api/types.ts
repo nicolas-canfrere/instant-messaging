@@ -11,6 +11,20 @@ export type ConversationSummary = {
   last_message_sender_id: string | null;
 };
 
+export type ConversationMember = { user_id: string; role: string };
+
+/**
+ * Le detail est la SEULE reponse qui expose les membres : la liste des
+ * conversations n'en donne pas. C'est par la qu'on retrouve l'interlocuteur
+ * d'une conversation directe pour l'afficher par son nom.
+ */
+export type ConversationDetail = {
+  id: string;
+  type: 'direct' | 'group';
+  title: string | null;
+  members: ConversationMember[];
+};
+
 export type ApiMessage = {
   id: string;
   conversation_id: string;
