@@ -263,6 +263,7 @@ conversations
   id ULID PK · type ('direct'|'group') · title NULLABLE · created_by FK
   direct_key NULLABLE UNIQUE                            ← unicité des 1-1
   last_message_id NULLABLE · last_message_at NULLABLE   ← pointeur dénormalisé
+  last_message_preview NULLABLE                         ← écrit par la chorégraphie (ADR 0001)
   created_at
 
 conversation_members
@@ -281,9 +282,11 @@ messages
 1. **`direct_key`** — sans lui, cliquer deux fois sur « écrire à Bob » crée deux conversations 1-1.
    Valeur = les deux `user_id` triés puis concaténés ; `NULL` pour les groupes. Postgres autorise
    plusieurs `NULL` dans un index unique, donc une seule colonne couvre les deux types.
-2. **`last_message_id` / `last_message_at`** — le « pointeur dénormalisé » recommandé par
-   [[Groupes et fan-out]] pour absorber le coût de l'écran d'accueil en pull. Mis à jour **dans la
-   même transaction** que l'insert du message (voir section 3, « franchissement d'agrégat assumé »).
+2. **`last_message_id` / `last_message_at` / `last_message_preview`** — le « pointeur dénormalisé »
+   recommandé par [[Groupes et fan-out]] pour absorber le coût de l'écran d'accueil en pull, poussé
+   jusqu'à l'aperçu. Écrit par le listener `Conversation` réagissant à `MessageWasSent`
+   ([ADR 0001](../../adr/0001-cross-context-communication.md)) — **pas** par `Message`.
+   Stocker l'aperçu supprime la jointure vers `messages`, donc le dernier accès croisé aux tables.
 
 ### Extensibilité OAuth
 
@@ -346,32 +349,32 @@ src/Message/
 **Règle de dépendance** : `Domain` ne dépend de rien. `Application` dépend de `Domain`.
 `Infrastructure` dépend des deux. Jamais l'inverse.
 
-**Règle inter-contextes : aucun contexte n'en référence un autre. Zéro exception.** Dès qu'un
-élément est consommé par plus d'un contexte, il remonte dans `Shared`.
+**Règle inter-contextes → [ADR 0001](../../adr/0001-cross-context-communication.md).** Un contexte
+ne dépend jamais que du **contrat publié** d'un autre — jamais de ses internes, ni de son code, ni de
+ses tables. Un `SELECT` dans la table d'un contexte voisin est une violation, même invisible pour
+deptrac.
 
-| Élément partagé | Emplacement |
+En résumé, tel qu'appliqué en tranche 1 :
+
+| Élément | Emplacement |
 |---|---|
 | Identifiants — `UserId`, `ConversationId`, `MessageId` | `Shared/Domain/Identifier/` |
-| Domain events écoutés par un autre contexte — `MessageWasSent`, `MembershipChanged` | `Shared/Domain/Event/` |
-| Adaptateur de sécurité utilisé par tous les contrôleurs — `SecurityUser` | `Shared/Infrastructure/Security/` |
-| VO spécifiques — `MessageContent`, `DirectKey`, `Topic`… | dans leur contexte |
+| Événements inter-contextes — `MessageWasSent`, `MembershipChanged` | `Shared/Domain/Event/` |
+| `SecurityUser` | `Shared/Infrastructure/Security/` |
+| **Contrat de lecture publié** — `MemberConversationsFinderInterface` + `MemberConversationView` | `Conversation/Application/Contract/` |
+| Son implémentation | `Conversation/Infrastructure/Contract/` |
+| Le besoin côté consommateur | `Realtime/Domain/Port/` + adaptateur qui délègue |
 
-**Conséquence sur la charge utile des événements partagés** : elle ne peut contenir que des
-types de `Shared` et des scalaires PHP, jamais un VO local. `MessageWasSent` transporte le
-contenu en `string`, pas en `MessageContent`.
+- **Lectures** : contrat publié, DTO stable, jamais l'agrégat. Le producteur possède sa surface —
+  les contrats **ne remontent pas** dans `Shared`, qui serait gonflé et la propriété diluée.
+- **Écritures** : **chorégraphie**. Un contexte ne pilote jamais les use cases d'un autre.
+- **Charge utile d'un événement partagé** : types de `Shared` et scalaires uniquement.
+  `MessageWasSent` transporte le contenu en `string` — un VO de `Message` dans `Shared` inverserait
+  la dépendance.
 
-C'est le bon comportement, pas une concession : un événement qui franchit une frontière est un
-**contrat**, et un contrat s'exprime dans le vocabulaire commun aux deux parties. Le mettre
-dans `Shared` tout en le laissant transporter un VO local ferait dépendre `Shared` d'un
-contexte — une inversion pire que le problème d'origine.
-
-Un événement qu'un seul contexte écoute reste chez lui ; il ne remonte que le jour où un
-deuxième s'y abonne.
-
-**Ce que cette règle achète** : le `ruleset` deptrac s'énonce uniformément — chaque couche ne
-voit que sa propre couche inférieure et `Shared`. Aucune ligne ne commence par « sauf ». Une
-règle sans dérogation ne se négocie pas et n'accueille pas de deuxième cas particulier six
-mois plus tard.
+**Deux fichiers deptrac** : `deptrac.yaml` (dimension technique) et `deptrac-contexts.yaml`
+(dimension contexte + allowlist vers les couches `*Contract`). Deptrac n'accepte qu'un `ruleset` par
+fichier, et mélanger les deux dimensions imposerait le produit cartésien couche × contexte.
 
 ### 3.2 Ports de l'hexagone
 
@@ -556,14 +559,30 @@ sans dérogation ne se négocie pas et ne se dégrade pas.
 ajouter un serait absurde. La frontière est choisie selon la **taille de la transaction d'écriture**,
 pas selon la logique de contenance. C'est le critère correct, et il vaut d'être écrit.
 
-**Franchissement d'agrégat assumé** : `SendMessageHandler` modifie deux agrégats dans une transaction
-(insert du `Message`, mise à jour du pointeur sur `Conversation`).
+**Le pointeur `last_message_*` est mis à jour par chorégraphie**, pas dans la transaction de l'insert.
 
-- *Le puriste dirait* : passer par un domain event et une cohérence à terme.
-- *Décision* : même transaction. Le pointeur serait faux le temps d'un aller-retour, ce qui se verrait
-  directement dans la liste des conversations. Sur un projet mono-base, l'asynchronisme achèterait un
-  bug d'affichage au prix d'une complexité réelle.
-- Documenté comme un **choix**, pas comme un oubli.
+> ⚠️ **Décision révisée.** Cette section retenait initialement « même transaction », avec un
+> franchissement d'agrégat assumé : `SendMessageHandler` insérait le message **et** mettait à jour le
+> pointeur sur `Conversation`. L'[ADR 0001](../../adr/0001-cross-context-communication.md) **supersede**
+> ce choix.
+
+Motif : la version « même transaction » faisait écrire `Message` dans la table de `Conversation` —
+c'est-à-dire un contexte pilotant l'écriture d'un autre, ce que la règle inter-contextes interdit.
+
+**Nouvelle mécanique** : `Message` publie `MessageWasSent` ; `Conversation` l'écoute et met à jour
+**son** pointeur et **son** aperçu par sa propre commande. Chaque agrégat n'est modifié que par son
+propre contexte.
+
+**Ce que ça coûte** : le pointeur devient éventuellement cohérent. La fenêtre est microscopique —
+événement publié après commit, même processus, même requête HTTP — et le pointeur est
+**auto-réparateur** : le message suivant le corrige. Le mode d'échec est un aperçu périmé dans la
+liste des conversations, jamais un message perdu ; l'échec de la seconde transaction est loggué en
+`error`.
+
+**Ce que ça rapporte** : deux couplages de schéma disparaissent d'un coup. `Message` n'écrit plus dans
+`conversations`, et comme l'événement transporte le contenu, le listener stocke un
+`last_message_preview` — ce qui supprime aussi le `LEFT JOIN messages` de la requête de l'écran
+d'accueil (section 4).
 
 ### 3.7 Domain events : publier après le commit
 

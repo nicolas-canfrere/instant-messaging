@@ -5,8 +5,10 @@ d'architecture et de code prime sur la vitesse de livraison.
 
 - **Concepts et raisonnements** : vault Obsidian `~/Documents/obsidian_vaults/tech/InstantMessaging`
   (17 notes, en français) — le *pourquoi* de chaque mécanisme.
-- **Décisions d'architecture** : `docs/superpowers/specs/` — une spec par tranche, avec les
-  alternatives écartées et leur coût. À lire avant de proposer un changement d'archi.
+- **Décisions transverses** : `docs/adr/` — les ADR survivent aux tranches et **priment sur les
+  specs** en cas de divergence. Toute décision d'archi qui dépasse une tranche s'y consigne.
+- **Décisions d'architecture d'une tranche** : `docs/superpowers/specs/` — une spec par
+  tranche, avec les alternatives écartées et leur coût.
 - **Plans d'implémentation** : `docs/superpowers/plans/` — une story = une branche.
 
 Découpage en 5 tranches (détail dans la spec T1) : **T1 noyau temps réel + conversations** ·
@@ -54,27 +56,38 @@ Ils communiquent **par identifiants**, jamais en référençant le `Domain` d'un
 
 Règle de dépendance : `Infrastructure` → `Application` → `Domain`. Jamais l'inverse.
 
-### Règle : tout ce qui est inter-contexte vit dans `Shared`
+### Communication inter-contextes — voir [ADR 0001](docs/adr/0001-cross-context-communication.md)
 
-**Aucun contexte ne référence jamais un autre contexte. Zéro exception, zéro dérogation
-deptrac.** Dès qu'un élément est consommé par plus d'un contexte, il remonte dans `Shared` —
-c'est ce qui rend la règle deptrac énonçable sans « sauf ».
+**Un contexte ne dépend jamais que du contrat publié d'un autre — jamais de ses internes, ni
+de son code, ni de ses tables.** Un `SELECT` dans la table d'un contexte voisin est une
+violation, même si deptrac ne la voit pas.
 
 | Élément | Emplacement |
 |---|---|
 | Identifiants (`UserId`, `ConversationId`, `MessageId`) | `Shared/Domain/Identifier/` |
-| Domain events écoutés par un autre contexte (`MessageWasSent`, `MembershipChanged`) | `Shared/Domain/Event/` |
-| Adaptateur de sécurité utilisé par tous les contrôleurs (`SecurityUser`) | `Shared/Infrastructure/Security/` |
-| VO **spécifiques** (`MessageContent`, `ClientMessageId`, `DirectKey`, `MemberRole`, `ConversationType`, `Topic`) | dans leur contexte |
+| Événements inter-contextes (`MessageWasSent`, `MembershipChanged`) | `Shared/Domain/Event/` |
+| `SecurityUser` (tous les contrôleurs en dépendent) | `Shared/Infrastructure/Security/` |
+| **Contrats de lecture publiés** | `{Contexte}/Application/Contract/` — **pas** dans `Shared` : le producteur possède sa surface publiée |
+| Implémentation d'un contrat | `{Contexte}/Infrastructure/Contract/` |
+| Le besoin, côté consommateur | `{Contexte}/Domain/Port/` + adaptateur qui délègue au contrat |
+| VO spécifiques (`MessageContent`, `DirectKey`, `Topic`…) | dans leur contexte |
 
-**Corollaire sur les événements partagés** : leur charge utile ne peut contenir que des types
-de `Shared` et des scalaires PHP — jamais un VO local. `MessageWasSent` transporte donc le
-contenu en `string`, pas en `MessageContent`. Un événement qui franchit une frontière est un
-**contrat** : il s'exprime dans le vocabulaire commun, sinon `Shared` dépendrait d'un contexte
-et l'inversion serait pire que le problème.
+**Lectures** : contrat publié (`{Chose}FinderInterface` + `{Chose}View`, jamais l'agrégat).
 
-Un événement qu'un seul contexte écoute reste chez lui. Il ne remonte que le jour où un
-deuxième contexte s'y abonne.
+**Écritures** : **chorégraphie**. Un contexte ne pilote jamais les use cases d'un autre. Le
+producteur publie un fait, l'intéressé réagit avec sa propre commande. `Conversation` écoute
+`MessageWasSent` et met à jour son propre pointeur — `Message` n'écrit jamais dans
+`conversations`.
+
+**Charge utile d'un événement partagé** : uniquement des types de `Shared` et des scalaires.
+`MessageWasSent` transporte le contenu en `string`, pas en `MessageContent` — sinon `Shared`
+dépendrait de `Message`. Un événement qu'un seul contexte écoute reste chez lui.
+
+**Modifier un `*View` ou la charge utile d'un événement partagé est un changement cassant.**
+
+Deux fichiers deptrac : `deptrac.yaml` (dimension technique) et `deptrac-contexts.yaml`
+(dimension contexte + allowlist vers les couches `*Contract`). Les deux tournent dans
+`make qa`.
 
 ### Persistance : DBAL, jamais l'ORM
 
