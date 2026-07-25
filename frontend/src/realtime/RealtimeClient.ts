@@ -15,6 +15,16 @@ export type Options = {
   onError?: (cause: unknown) => void;
   /** Le JWT vit 15 min ; on le renouvelle avant, pour ne jamais subir l'expiration. */
   refreshIntervalMs?: number;
+  /**
+   * Delai avant de retenter une connexion qui a echoue.
+   *
+   * 5 s, et non l'intervalle de renouvellement (13 min) : une panne de
+   * `/api/realtime/token` est le plus souvent breve (redemarrage du backend,
+   * hoquet reseau), et laisser l'utilisateur 13 min sans temps reel alors que
+   * le reste de l'interface repond reviendrait a une panne silencieuse. Assez
+   * long, en revanche, pour ne pas marteler un serveur deja en difficulte.
+   */
+  retryDelayMs?: number;
 };
 
 /**
@@ -27,12 +37,18 @@ export type Options = {
 export class RealtimeClient {
   private source: EventSourceLike | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   /** Serialise start/resubscribe : deux appels concurrents ne peuvent pas ouvrir deux flux. */
   private pending: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: Options) {}
 
+  /**
+   * Ne rejette jamais : l'appelant fait `void client.start()`, un rejet y serait
+   * avale sans trace et l'utilisateur verrait une interface complete mais muette.
+   * Un echec est donc signale par `onError` et suivi d'un reessai programme.
+   */
   start(): Promise<void> {
     this.stopped = false;
 
@@ -41,21 +57,16 @@ export class RealtimeClient {
         return;
       }
 
-      await this.open();
-      this.scheduleRefresh();
+      await this.connectSafely();
     });
   }
 
-  /** A appeler apres avoir cree ou rejoint une conversation, ou sur membership.changed. */
+  /**
+   * A appeler apres avoir cree ou rejoint une conversation, ou sur membership.changed.
+   * Ne rejette jamais non plus (appelee en `void` par le timer de renouvellement).
+   */
   resubscribe(): Promise<void> {
-    return this.enqueue(async () => {
-      if (this.stopped) {
-        return;
-      }
-
-      this.closeSource();
-      await this.open();
-    });
+    return this.enqueue(() => this.connectSafely());
   }
 
   stop(): void {
@@ -66,6 +77,11 @@ export class RealtimeClient {
       clearInterval(this.timer);
       this.timer = null;
     }
+
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
   }
 
   private enqueue(task: () => Promise<void>): Promise<void> {
@@ -74,12 +90,38 @@ export class RealtimeClient {
     return this.pending;
   }
 
-  private async open(): Promise<void> {
+  /** Enveloppe de `connect()` qui transforme tout echec en signal + reessai. */
+  private async connectSafely(): Promise<void> {
+    if (this.stopped) {
+      return;
+    }
+
+    try {
+      await this.connect();
+      this.scheduleRefresh();
+    } catch (cause) {
+      this.options.onError?.(cause);
+      this.scheduleRetry();
+    }
+  }
+
+  /**
+   * Le jeton est recupere AVANT toute fermeture : si `fetchToken` echoue, le flux
+   * en cours continue de vivre. Fermer d'abord aurait laisse l'application
+   * totalement hors ligne jusqu'au prochain tic, pour une panne passagere.
+   *
+   * L'invariant « jamais deux EventSource ouverts » tient toujours : `enqueue`
+   * serialise les appels, et entre `closeSource()` et l'exposition de la nouvelle
+   * source il n'y a aucun `await` — donc aucun point d'entrelacement.
+   */
+  private async connect(): Promise<void> {
     const token = await this.options.fetchToken();
 
     if (this.stopped) {
       return;
     }
+
+    this.closeSource();
 
     const url = new URL(token.hub_url);
     for (const topic of token.topics) {
@@ -120,6 +162,23 @@ export class RealtimeClient {
       () => void this.resubscribe(),
       this.options.refreshIntervalMs ?? 13 * 60 * 1000,
     );
+  }
+
+  /**
+   * Un seul reessai en attente a la fois : `setTimeout` et non `setInterval`,
+   * pour que la tentative suivante ne soit programmee qu'apres l'echec de la
+   * precedente (une tentative lente ne s'empile donc jamais sur elle-meme).
+   */
+  private scheduleRetry(): void {
+    if (this.retryTimer !== null || this.stopped) {
+      return;
+    }
+
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+
+      void this.enqueue(() => this.connectSafely());
+    }, this.options.retryDelayMs ?? 5000);
   }
 
   private closeSource(): void {
