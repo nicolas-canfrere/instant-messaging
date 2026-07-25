@@ -38,6 +38,7 @@ services:
     # ---------------------------------------------------------------------
     App\Shared\Domain\IdGeneratorInterface: '@App\Shared\Infrastructure\Id\UlidGenerator'
     App\Shared\Application\Event\DomainEventCollectorInterface: '@App\Shared\Infrastructure\Event\InMemoryDomainEventCollector'
+    App\Identity\Domain\UserRepositoryInterface: '@App\Identity\Infrastructure\Persistence\DbalUserRepository'
 
     # CQS : deux bus distincts, nommes a l'injection, pour qu'un handler ne
     # puisse pas se tromper de bus par inadvertance.

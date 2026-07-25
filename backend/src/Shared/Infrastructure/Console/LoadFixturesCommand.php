@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Shared\Infrastructure\Console;
 
 use App\Shared\Domain\IdGeneratorInterface;
+use App\Shared\Infrastructure\Security\SecurityUser;
 use Doctrine\DBAL\Connection;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -13,7 +14,6 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\PasswordHasher\Hasher\PasswordHasherFactoryInterface;
-use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 
 #[AsCommand(name: 'app:fixtures:load', description: 'Vide la base et charge un jeu de donnees jouable')]
 final class LoadFixturesCommand extends Command
@@ -31,7 +31,7 @@ final class LoadFixturesCommand extends Command
     {
         $io = new SymfonyStyle($input, $output);
         $now = $this->clock->now()->format(\DateTimeInterface::ATOM);
-        $hash = $this->hasherFactory->getPasswordHasher(PasswordAuthenticatedUserInterface::class)->hash('password');
+        $hash = $this->hasherFactory->getPasswordHasher(SecurityUser::class)->hash('password');
 
         $this->connection->executeStatement('TRUNCATE messages, conversation_members, conversations, users CASCADE');
 
