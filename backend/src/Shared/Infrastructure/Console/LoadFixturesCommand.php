@@ -50,7 +50,7 @@ final class LoadFixturesCommand extends Command
                     'id' => $id,
                     'username' => $username,
                     'display_name' => $displayName,
-                    'email' => $username . '@example.test',
+                    'email' => sprintf('%s@example.test', $username),
                     'password_hash' => $hash,
                     'provider' => 'local',
                     'created_at' => $now,

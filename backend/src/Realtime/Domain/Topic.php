@@ -28,7 +28,7 @@ final readonly class Topic implements \Stringable
 
     public static function conversation(ConversationId $conversationId): self
     {
-        return new self('/conversations/' . $conversationId->toString());
+        return new self(sprintf('/conversations/%s', $conversationId->toString()));
     }
 
     /**
@@ -38,7 +38,7 @@ final readonly class Topic implements \Stringable
      */
     public static function userSystem(UserId $userId): self
     {
-        return new self('/users/' . $userId->toString() . '/system');
+        return new self(sprintf('/users/%s/system', $userId->toString()));
     }
 
     public function toString(): string
