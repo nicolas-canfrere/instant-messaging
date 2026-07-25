@@ -14,7 +14,7 @@ final class AuthenticationTest extends DatabaseTestCase
 
         self::assertResponseStatusCodeSame(401);
         self::assertResponseHeaderSame('Content-Type', 'application/problem+json');
-        self::assertSame('/problems/authentication-required', $this->problem()['type']);
+        self::assertSame('/problems/authentication-required', $this->json()['type']);
     }
 
     public function testLoginThenMeReturnsTheCurrentUser(): void
@@ -45,7 +45,7 @@ final class AuthenticationTest extends DatabaseTestCase
         self::assertResponseStatusCodeSame(401);
         self::assertResponseHeaderSame('Content-Type', 'application/problem+json');
 
-        $problem = $this->problem();
+        $problem = $this->json();
 
         self::assertSame('/problems/invalid-credentials', $problem['type']);
         // Le detail ne dit jamais laquelle des deux valeurs est fausse : ce
@@ -79,31 +79,5 @@ final class AuthenticationTest extends DatabaseTestCase
         $this->client->request('GET', '/api/users');
 
         self::assertResponseStatusCodeSame(401);
-    }
-
-    protected function login(string $username): void
-    {
-        $this->client->request(
-            'POST',
-            '/api/login',
-            server: ['CONTENT_TYPE' => 'application/json'],
-            content: json_encode(['username' => $username, 'password' => 'password'], \JSON_THROW_ON_ERROR),
-        );
-
-        self::assertResponseIsSuccessful();
-    }
-
-    /** @return array<string, mixed> */
-    private function problem(): array
-    {
-        /** @var array<string, mixed> $problem */
-        $problem = json_decode(
-            (string) $this->client->getResponse()->getContent(),
-            true,
-            512,
-            \JSON_THROW_ON_ERROR,
-        );
-
-        return $problem;
     }
 }

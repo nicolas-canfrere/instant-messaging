@@ -39,6 +39,17 @@ services:
     App\Shared\Domain\IdGeneratorInterface: '@App\Shared\Infrastructure\Id\UlidGenerator'
     App\Shared\Application\Event\DomainEventCollectorInterface: '@App\Shared\Infrastructure\Event\InMemoryDomainEventCollector'
     App\Identity\Domain\UserRepositoryInterface: '@App\Identity\Infrastructure\Persistence\DbalUserRepository'
+    App\Realtime\Domain\EventPublisherInterface: '@App\Realtime\Infrastructure\Mercure\MercureEventPublisher'
+
+    # Contrat publie par Conversation, consomme par Realtime : le seul couplage
+    # inter-contextes du projet, et il vise une surface publiee (cf. ADR 0001).
+    App\Conversation\Application\Contract\MemberConversationsFinderInterface: '@App\Conversation\Infrastructure\Contract\DbalMemberConversationsFinder'
+
+    # L'URL que le NAVIGATEUR ouvre, donc celle qui passe par l'origine unique —
+    # pas l'URL interne par laquelle le backend publie.
+    App\Realtime\Infrastructure\Http\RealtimeTokenController:
+        arguments:
+            $mercurePublicUrl: '%env(MERCURE_PUBLIC_URL)%'
 
     # CQS : deux bus distincts, nommes a l'injection, pour qu'un handler ne
     # puisse pas se tromper de bus par inadvertance.

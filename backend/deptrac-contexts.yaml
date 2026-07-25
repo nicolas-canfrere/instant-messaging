@@ -38,10 +38,17 @@ deptrac:
 
     ruleset:
         Shared: [Vendor]
-        ConversationContract: ~          # un contrat ne depend de rien
+
+        # Un contrat publie ne depend d'aucun CONTEXTE, mais il parle le langage
+        # partage : sa signature ne peut etre faite que d'identifiants de Shared
+        # et de scalaires (ADR 0001). Sans Shared ici, aucun contrat ne pourrait
+        # nommer ce qu'il rend.
+        ConversationContract: [Shared]
 
         Identity: [Shared, Vendor]
-        Conversation: [Shared, Vendor]
+        # Conversation depend de son PROPRE contrat : le producteur possede sa
+        # surface publiee, donc il l'implemente.
+        Conversation: [Shared, ConversationContract, Vendor]
         Message: [Shared, Vendor]
 
         # Allowlist explicite : ajouter un couplage inter-contextes demande de
