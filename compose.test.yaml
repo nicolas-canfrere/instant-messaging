@@ -1,0 +1,54 @@
+# Stack dédiée aux tests, lancée sous un nom de projet distinct
+# (`-p instant-messaging-test`) : ses conteneurs, son réseau et ses volumes
+# n'entrent jamais en collision avec ceux du `compose.yaml` de dev. On peut donc
+# la détruire entièrement entre deux exécutions sans toucher la base de travail.
+#
+# Ni caddy ni mercure ici : les tests fonctionnels passent par WebTestCase, qui
+# appelle le noyau HTTP en direct sans traverser le réseau. La publication temps
+# réel se teste contre un double de `EventPublisherInterface`, pas contre le hub.
+
+services:
+  backend-test:
+    build:
+      context: ./backend
+      args:
+        USER_ID: "${USER_ID:-1000}"
+        GROUP_ID: "${GROUP_ID:-1000}"
+    environment:
+      APP_ENV: test
+      # `doctrine.yaml` ajoute le suffixe `_test` dans cet environnement :
+      # la base réellement utilisée est `app_test`.
+      DATABASE_URL: "postgresql://app:app@postgres-test:5432/app?serverVersion=17&charset=utf8"
+      MERCURE_URL: "http://mercure.invalid/.well-known/mercure"
+      MERCURE_PUBLIC_URL: "http://localhost:8080/.well-known/mercure"
+      # Valeur fixe : les tests qui vérifient un JWT doivent être déterministes.
+      MERCURE_JWT_SECRET: "secret-de-test-de-32-caracteres-minimum"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    # L'image démarre FrankenPHP par défaut. Ici le conteneur n'est qu'un
+    # runtime pour `docker compose run` : rien à servir.
+    entrypoint: []
+    command: ["sleep", "infinity"]
+
+  postgres-test:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    # Aucun port publié : la base de dev garde le 5432 de l'hôte pour elle.
+    #
+    # Les données vivent en tmpfs, donc en RAM : les tests vont plus vite, et il
+    # ne reste rien sur le disque à nettoyer. `fsync=off` est acceptable ici
+    # précisément parce que ces données sont jetables par construction.
+    tmpfs:
+      - /var/lib/postgresql/data
+    command: ["postgres", "-c", "fsync=off", "-c", "full_page_writes=off", "-c", "synchronous_commit=off"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
