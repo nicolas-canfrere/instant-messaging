@@ -1,0 +1,571 @@
+# Instant Messaging — Tranche 1 : noyau temps réel + conversations
+
+> Source conceptuelle : vault Obsidian `tech/InstantMessaging`. Ce document ne réexplique pas les
+> concepts — il fige les **décisions d'implémentation** et renvoie aux notes.
+
+## Contexte
+
+Mise en œuvre du system design étudié dans le vault. Objectif : **vitrine / portfolio** — qualité de
+code, tests, architecture démontrable et défendable en entretien.
+
+### Découpage en tranches
+
+Les 17 notes du vault représentent plusieurs projets. Découpage retenu :
+
+| Tranche | Contenu | Notes couvertes |
+|---|---|---|
+| **1 — Noyau + conversations** | Infra, auth locale, CRUD conversations, envoi/réception temps réel, ULID, idempotence | Stack, SSE vs WebSocket, Modèle de données, ULID, Idempotence, Groupes et fan-out, Organisation du code |
+| 2 — Statuts & présence | Watermarks distribué/lu, typing, online (Redis TTL) | Accusés de réception et présence |
+| 3 — Cycle de vie | Édition, soft-delete / tombstone, fuseaux horaires | Suppression et édition, Gestion du temps |
+| 4 — Médias | MinIO, URLs pré-signées, unfurling, SSRF | Médias et aperçus, Dev local MinIO |
+| 5 — Robustesse | Rate limiting, modération, recherche | Modération et rate limiting, Recherche |
+
+**Ce document couvre la tranche 1 uniquement.** Chaque tranche aura sa propre spec et son plan.
+
+### Choix transverses
+
+| Sujet | Décision |
+|---|---|
+| Backend | Symfony 7 / PHP 8.4, **contrôleurs manuels** (pas d'API Platform : on veut voir le code, pas la config) |
+| Architecture backend | **Hexagonale par contexte + CQS**, value objects systématiques (section 3) |
+| Frontend | React + TypeScript, Vite, CSS Modules |
+| Base | PostgreSQL 17 |
+| Temps réel | Mercure (hub `dunglas/mercure`), SSE |
+| Auth T1 | Login local (session Symfony), **conçue pour accueillir OAuth sans refonte** |
+| Tests | PHPUnit unitaires (domaine + use cases) et fonctionnels (adaptateurs) ; Vitest côté front |
+
+---
+
+## Section 1 — Architecture & topologie
+
+### Services (5 conteneurs)
+
+Redis et MinIO sont **volontairement absents** : aucun usage en tranche 1 (présence → T2, médias → T4).
+
+| Service | Image / base | Rôle | Exposé |
+|---|---|---|---|
+| `caddy` | `caddy` | Reverse proxy, **seule origine publique** | `localhost:8080` |
+| `backend` | FrankenPHP (mode serveur PHP seul) | API métier | interne |
+| `frontend` | `node` + Vite dev server | Client React | interne |
+| `mercure` | `dunglas/mercure` | Hub temps réel | interne |
+| `postgres` | `postgres:17` | Persistance | `5432` (confort outillage) |
+
+### Origine unique
+
+```
+localhost:8080/                      → frontend:5173   (HMR websocket inclus)
+localhost:8080/api/*                 → backend:80
+localhost:8080/.well-known/mercure   → mercure:80
+```
+
+**Pourquoi une origine unique** : le JWT Mercure voyage dans un cookie ; les futurs `redirect_uri`
+OAuth exigent une origine stable ; le CORS disparaît. Le hub reste un **service séparé** — la leçon
+centrale de [[Stack - PHP + Mercure + JS]] est préservée (contrairement à FrankenPHP tout-en-un, qui
+la masquerait).
+
+### Piège « URL interne vs publique »
+
+Le piège décrit dans [[Organisation du code (repo local)]] devient trivial à énoncer — deux variables
+d'environnement distinctes :
+
+| Variable | Valeur | Utilisateur |
+|---|---|---|
+| `MERCURE_PUBLISH_URL` | `http://mercure/.well-known/mercure` | le **backend** publie |
+| `MERCURE_PUBLIC_URL` | `http://localhost:8080/.well-known/mercure` | le **navigateur** s'abonne |
+
+### Arborescence du dépôt
+
+```
+instant-messaging/
+├── docker-compose.yml
+├── .env.example              # commité
+├── .env.local                # gitignored
+├── Makefile                  # make up / migrate / fixtures / test / qa
+├── README.md
+├── backend/
+│   ├── Dockerfile
+│   ├── src/                  # voir section 3
+│   ├── migrations/
+│   ├── tests/
+│   └── deptrac.yaml
+├── frontend/
+│   ├── Dockerfile
+│   └── src/                  # voir section 7
+├── infra/
+│   ├── caddy/Caddyfile
+│   └── mercure/
+└── docs/superpowers/specs/
+```
+
+---
+
+## Section 2 — Modèle de données
+
+Fidèle à [[Modèle de données]] : 1-1 et groupes unifiés, ULID serveur, `created_at` conservé,
+**fan-out de stockage en pull**.
+
+```
+users
+  id ULID PK · username UNIQUE · display_name · email UNIQUE
+  password_hash NULLABLE · provider ('local') · external_id NULLABLE
+  created_at
+  UNIQUE (provider, external_id)
+
+conversations
+  id ULID PK · type ('direct'|'group') · title NULLABLE · created_by FK
+  direct_key NULLABLE UNIQUE                            ← unicité des 1-1
+  last_message_id NULLABLE · last_message_at NULLABLE   ← pointeur dénormalisé
+  created_at
+
+conversation_members
+  conversation_id FK · user_id FK · role ('member'|'admin') · joined_at
+  PK (conversation_id, user_id)
+
+messages
+  id ULID PK (serveur) · conversation_id FK · sender_id FK
+  content TEXT · client_message_id · created_at
+  UNIQUE (sender_id, client_message_id)     ← idempotence
+  INDEX (conversation_id, id DESC)          ← requête dominante
+```
+
+### Ajouts par rapport aux notes, et pourquoi
+
+1. **`direct_key`** — sans lui, cliquer deux fois sur « écrire à Bob » crée deux conversations 1-1.
+   Valeur = les deux `user_id` triés puis concaténés ; `NULL` pour les groupes. Postgres autorise
+   plusieurs `NULL` dans un index unique, donc une seule colonne couvre les deux types.
+2. **`last_message_id` / `last_message_at`** — le « pointeur dénormalisé » recommandé par
+   [[Groupes et fan-out]] pour absorber le coût de l'écran d'accueil en pull. Mis à jour **dans la
+   même transaction** que l'insert du message (voir section 3, « franchissement d'agrégat assumé »).
+
+### Extensibilité OAuth
+
+`password_hash` nullable + `provider` + `external_id` dès la première migration. Passer à OAuth =
+ajouter un authenticator dans `security.yaml` (`knpuniversity/oauth2-client-bundle`). **Aucun**
+changement d'entité de domaine, de use case ou de topic.
+
+### Hors périmètre T1 (ajout par migration en T2/T3)
+
+`last_read_message_id`, `last_delivered_message_id`, `last_active_at`, `deleted_at`, `edited_at`.
+Ajouter une colonne est trivial ; coder une UI de watermarks à moitié ne l'est pas.
+
+### Décision produit tranchée
+
+**Un nouveau membre voit l'historique antérieur à son arrivée** (modèle Slack). La question était
+laissée ouverte par [[Groupes et fan-out]]. Sinon il faudrait filtrer chaque requête d'historique par
+`joined_at`, ce qui complique la pagination sans rien démontrer d'intéressant.
+
+---
+
+## Section 3 — Architecture applicative du backend
+
+Contrainte : **architecture hexagonale, CQS, pas de primitive obsession.** Cette section fige comment
+ces principes se traduisent concrètement, et où on les assouplit délibérément.
+
+### 3.1 Découpage : hexagone par contexte
+
+Quatre contextes, chacun avec ses trois couches, plus un noyau partagé.
+
+```
+backend/src/
+├── Shared/
+│   ├── Domain/           # Clock, IdGenerator (ports), exceptions de base
+│   └── Infrastructure/   # bus Messenger, mapping problem+json, types Doctrine génériques
+├── Identity/
+├── Conversation/
+├── Message/
+└── Realtime/
+```
+
+Exemple complet, le contexte `Message` :
+
+```
+src/Message/
+├── Domain/                      # PHP pur — zéro Symfony, zéro Doctrine
+│   ├── Message.php
+│   ├── MessageId.php  ClientMessageId.php  MessageContent.php
+│   ├── MessageRepository.php            (port secondaire)
+│   ├── Event/MessageWasSent.php
+│   └── Exception/MessageContentIsEmpty.php …
+├── Application/
+│   ├── Command/SendMessage.php  SendMessageHandler.php
+│   └── Query/GetMessagePage.php  GetMessagePageHandler.php  MessageView.php
+└── Infrastructure/
+    ├── Http/SendMessageController.php  GetMessagesController.php
+    ├── Doctrine/DoctrineMessageRepository.php  Message.orm.xml  Type/MessageIdType.php
+    └── Dbal/SqlMessagePageQuery.php
+```
+
+**Règle de dépendance** : `Domain` ne dépend de rien. `Application` dépend de `Domain`.
+`Infrastructure` dépend des deux. Jamais l'inverse.
+
+### 3.2 Ports de l'hexagone
+
+| Port | Type | Implémentation T1 |
+|---|---|---|
+| `ConversationRepository`, `MessageRepository`, `UserRepository` | secondaire | Doctrine ORM |
+| `EventPublisher` | secondaire | Mercure (`Realtime/Infrastructure`) |
+| `Clock` | secondaire | horloge système |
+| `IdGenerator` | secondaire | ULID via `symfony/uid` |
+| Contrôleurs HTTP → bus | primaire | Symfony |
+
+`Clock` et `IdGenerator` en ports n'est pas du dogmatisme : c'est ce qui rend les tests
+**déterministes** — ULIDs fixes et temps gelé, indispensable pour tester l'ordre des messages et la
+pagination keyset sans flakiness.
+
+### 3.3 CQS, pas CQRS
+
+**Ce qu'on fait** : séparer les chemins de lecture et d'écriture.
+
+| | Écriture | Lecture |
+|---|---|---|
+| Objet | `SendMessage` (command) | `GetMessagePage` (query) |
+| Traverse le domaine | oui | **non** |
+| Persistance | repository → Doctrine ORM | SQL direct via DBAL |
+| Retour | rien (ou l'identifiant créé) | DTO de lecture (`MessageView`) |
+| Bus | `command.bus` | `query.bus` |
+
+**Ce qu'on ne fait pas** : CQRS. Une seule base, pas de read model séparé, pas d'event sourcing, pas
+de projections asynchrones. La distinction est explicite dans le README — c'est précisément le genre
+de nuance qu'un relecteur technique cherche. Le vrai read model apparaîtra en T5
+([[Recherche dans l'historique]]).
+
+**Pourquoi les queries contournent le domaine** : hydrater des entités Doctrine pour les resérialiser
+en JSON est du gaspillage pur, et cela force le domaine à exposer des getters dont il n'a pas besoin.
+Le SQL de lecture rend l'index `(conversation_id, id DESC)` visible dans le code au lieu de le laisser
+à la merci de l'ORM.
+
+**Deux bus Messenger, synchrones**, avec le middleware `doctrine_transaction` sur `command.bus`
+uniquement. Ce n'est pas décoratif : c'est ce qui garantit que l'insert du message et la mise à jour du
+pointeur `last_message_*` sont dans la même transaction, sans un seul `beginTransaction()` dans un
+handler.
+
+### 3.4 Value objects — la fin de la primitive obsession
+
+| VO | Invariant porté |
+|---|---|
+| `UserId` `ConversationId` `MessageId` | ULID valide ; **types non interchangeables** |
+| `ClientMessageId` | format ULID/UUID valide, fourni par le client |
+| `MessageContent` | non vide après trim, ≤ 4000 caractères |
+| `DirectKey` | `DirectKey::forPair(UserId, UserId)` — trie en interne, donc commutatif par construction |
+| `ConversationType` `MemberRole` | enums PHP |
+| `Topic` | `Topic::conversation(ConversationId)` / `Topic::userSystem(UserId)` |
+
+**Le gain concret, pas la théorie :**
+
+- Passer un `ConversationId` là où on attend un `UserId` devient une **erreur de type**, pas un bug de
+  production silencieux. Dans un modèle où tout est ULID, c'est loin d'être théorique.
+- `MessageContent` porte la validation « non vide, ≤ 4000 » **une seule fois**. Impossible de
+  construire un message invalide, quel que soit le point d'entrée.
+- `DirectKey` est commutatif *par construction* — l'invariant vit dans le type, pas dans la discipline
+  de l'appelant.
+- `Topic` supprime la construction de chaînes `'/conversations/' . $id` disséminée. Une faute de frappe
+  y serait un bug de sécurité silencieux : le message part sur un topic auquel personne n'est abonné,
+  ou pire, sur un topic mal cloisonné.
+
+Chaque VO d'identifiant a son **type Doctrine custom** — la persistance reste transparente, le domaine
+ignore la base.
+
+### 3.5 Garder le domaine pur : mapping XML
+
+Les entités de domaine sont mappées en **XML** (`Message.orm.xml`), pas en attributs PHP. Des attributs
+`#[ORM\Entity]` dans `Domain/` coupleraient le domaine à Doctrine — l'hexagone serait décoratif.
+
+**Coût assumé** : le mapping XML est plus verbeux et moins bien outillé par l'IDE. C'est le prix d'une
+règle de dépendance réellement respectée plutôt qu'affichée.
+
+**Exception pragmatique documentée** : `Domain/` dépend de `symfony/uid` pour les ULID. C'est une
+bibliothèque autonome, pas un framework ; réimplémenter un générateur ULID serait du zèle sans
+bénéfice. L'exception est whitelistée explicitement dans `deptrac.yaml`.
+
+### 3.6 Agrégats et frontières
+
+| Agrégat | Racine | Contenu |
+|---|---|---|
+| Conversation | `Conversation` | ses membres, son type, son pointeur de dernier message |
+| Message | `Message` | référence `ConversationId` et `UserId` par identifiant, pas par objet |
+
+**Pourquoi les messages ne sont pas dans l'agrégat Conversation** : charger 50 000 messages pour en
+ajouter un serait absurde. La frontière est choisie selon la **taille de la transaction d'écriture**,
+pas selon la logique de contenance. C'est le critère correct, et il vaut d'être écrit.
+
+**Franchissement d'agrégat assumé** : `SendMessageHandler` modifie deux agrégats dans une transaction
+(insert du `Message`, mise à jour du pointeur sur `Conversation`).
+
+- *Le puriste dirait* : passer par un domain event et une cohérence à terme.
+- *Décision* : même transaction. Le pointeur serait faux le temps d'un aller-retour, ce qui se verrait
+  directement dans la liste des conversations. Sur un projet mono-base, l'asynchronisme achèterait un
+  bug d'affichage au prix d'une complexité réelle.
+- Documenté comme un **choix**, pas comme un oubli.
+
+### 3.7 Domain events : publier après le commit
+
+`Message::send()` enregistre un `MessageWasSent` sur l'agrégat. L'événement est dispatché **après le
+commit** de la transaction, et c'est le listener qui appelle `EventPublisher`.
+
+**Pourquoi c'est non négociable** : publier sur Mercure à l'intérieur de la transaction permet de
+pousser aux clients un message qu'un rollback fera ensuite disparaître de la base. Les destinataires
+verraient un message qui n'existe pas. Le bug serait rare, non reproductible, et très coûteux à
+diagnostiquer.
+
+Effet de bord agréable : le rejeu idempotent (violation d'unicité → on renvoie l'existant) n'enregistre
+aucun événement, donc **ne republie rien**. La règle de la section 6 tombe de la structure au lieu
+d'être un `if` à ne pas oublier.
+
+### 3.8 Faire respecter l'architecture : deptrac en CI
+
+`qossmic/deptrac` échoue le build si :
+
+- `Domain` référence `Symfony\*`, `Doctrine\*` (hors whitelist `symfony/uid`) ;
+- `Application` référence `Infrastructure` ;
+- un contexte référence le `Domain` d'un autre contexte (ils communiquent par identifiants, pas par
+  objets).
+
+Sans cet outil, la règle de dépendance se dégrade en deux semaines. **C'est ce qui fait la différence
+entre une architecture hexagonale et un dossier nommé `Domain`** — et c'est vérifiable par un
+relecteur en une commande.
+
+### 3.9 Coût assumé
+
+Cette architecture multiplie environ par deux le nombre de fichiers de la tranche 1 par rapport à des
+contrôleurs Symfony classiques. Sur un projet de cette taille, elle ne se justifie **que** par
+l'objectif portfolio et par le fait que les tranches 2 à 5 vont réellement s'y greffer. C'est écrit ici
+pour que le choix reste conscient.
+
+---
+
+## Section 4 — API HTTP
+
+Routes sous `/api`, réponses JSON, erreurs en `application/problem+json` (RFC 7807). Les contrôleurs
+sont des **adaptateurs primaires** : désérialiser, construire la commande ou la query, dispatcher,
+sérialiser. Aucune logique métier.
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `POST` | `/api/login` | `json_login` Symfony → pose le cookie de session **et** le cookie Mercure |
+| `POST` | `/api/logout` | invalide les deux cookies |
+| `GET` | `/api/me` | identité courante |
+| `GET` | `/api/users` | annuaire (petit projet, fixtures) |
+| `GET` | `/api/conversations` | mes conversations, triées `last_message_at DESC`, avec aperçu |
+| `POST` | `/api/conversations` | `{type, title?, member_ids[]}` |
+| `GET` | `/api/conversations/{id}` | détail + membres |
+| `GET` | `/api/conversations/{id}/messages` | historique, `?before={ulid}&limit=50` |
+| `POST` | `/api/conversations/{id}/messages` | `{client_message_id, content}` |
+| `POST` | `/api/conversations/{id}/members` | `{user_ids[]}` — groupes, admin uniquement |
+| `DELETE` | `/api/conversations/{id}/members/{userId}` | idem, ou quitter soi-même |
+| `GET` | `/api/realtime/token` | réémet le cookie Mercure (section 5) |
+
+### Pagination par keyset, pas par offset
+
+`?before={ulid}` se traduit en `WHERE conversation_id = ? AND id < ? ORDER BY id DESC LIMIT 50`, qui
+consomme l'index `(conversation_id, id DESC)`. Un `OFFSET` deviendrait **faux** dès qu'un message
+arrive pendant qu'on remonte l'historique — scénario permanent dans une messagerie active.
+
+Réponse : `{ "items": [...], "next_before": "<ulid>|null" }`.
+
+### Création de direct idempotente
+
+`POST /api/conversations` avec `type: "direct"` calcule le `DirectKey` ; si la conversation existe,
+renvoie **200** avec l'existante au lieu de **201**. Même philosophie que `ClientMessageId`, appliquée
+aux conversations.
+
+### Autorisation
+
+Un voter Symfony `ConversationVoter` (`VIEW`, `POST_MESSAGE`, `MANAGE_MEMBERS`) couvre toutes les
+routes `/conversations/{id}/*`. Il délègue à un service d'appartenance du contexte `Conversation`.
+
+**Source de vérité unique** : ce même service alimente le voter **et** la liste des topics du JWT
+Mercure. Une divergence entre « qui peut lire l'API » et « qui peut s'abonner au topic » serait une
+faille — elle est structurellement impossible ici.
+
+---
+
+## Section 5 — Topics Mercure & autorisation
+
+### Topics de la tranche 1
+
+| Topic | Contenu | Présence dans le JWT |
+|---|---|---|
+| `/conversations/{ulid}` | `message.created` | une entrée par conversation dont je suis membre |
+| `/users/{monUlid}/system` | `membership.changed` | **toujours**, ne change jamais |
+
+Ces chaînes ne sont jamais écrites à la main : `Topic::conversation()` / `Topic::userSystem()`
+(section 3.4).
+
+### Publication
+
+Un seul `publish` par message sur `/conversations/{id}`, en *private update*. Le hub assure le fan-out
+O(N) ; le métier reste en O(1) — cf. [[Groupes et fan-out]]. L'`id` de l'événement Mercure est l'ULID
+du message, ce qui rendra `Last-Event-ID` exploitable en T2 sans changement de format.
+
+### Le JWT
+
+HS256, claim `mercure.subscribe` = les topics ci-dessus, **TTL 15 min**, livré en cookie
+`mercureAuthorization` (`HttpOnly`, `SameSite=Lax`, `Path=/.well-known/mercure`). Le front ne le lit
+jamais → pas de fuite par XSS.
+
+### Le problème de la réémission
+
+La liste des topics est figée à l'émission. Trois événements la périment :
+
+| Cas | Détection | Réaction |
+|---|---|---|
+| Je crée / rejoins une conversation | action locale | `GET /api/realtime/token` puis reconnexion `EventSource` |
+| Le JWT expire | minuteur front à 13 min | refresh silencieux |
+| **Quelqu'un m'ajoute à un groupe** | *aucune détection possible* | ← voir ci-dessous |
+
+**Solution du cas 3** : le topic `/users/{monUlid}/system` est dans **tous** mes JWT et ne change
+jamais, donc toujours joignable. Le backend y publie `membership.changed` ; le front appelle
+`/api/realtime/token` et se reconnecte. Un topic personnel permanent comme canal de notification des
+changements d'autorisation — pattern standard, réutilisé tel quel en T2 (`/users/{id}/receipts`).
+
+**Alternative écartée** : un wildcard `/conversations/{*}` dans le JWT. Supprimerait toute la mécanique
+de réémission, mais autoriserait n'importe qui à s'abonner à n'importe quelle conversation. Le contrôle
+d'accès disparaîtrait.
+
+---
+
+## Section 6 — Idempotence & flux d'envoi
+
+```
+1. Front génère un ULID client → client_message_id
+2. Affichage optimiste immédiat, statut « envoi… »
+3. POST /api/conversations/{id}/messages
+4. command.bus → SendMessageHandler, dans une transaction :
+   ├─ succès              → INSERT + MAJ pointeur, MessageWasSent enregistré  → 201
+   └─ violation d'unicité → SELECT l'existant, AUCUN événement                → 200
+5. Après commit : le listener publie sur Mercure (uniquement si événement)
+6. Front réconcilie par client_message_id → statut « envoyé », adopte l'ULID serveur
+7. Échec réseau : retry backoff exponentiel + jitter, MÊME client_message_id
+```
+
+### Dédup côté client, en deux passes
+
+L'expéditeur reçoit son propre message **deux fois** (réponse HTTP + SSE). Le store dédup d'abord par
+`client_message_id` (remplace l'optimiste), sinon par `id` serveur (ignore le doublon). C'est la
+« dédup aux deux bouts » de [[Idempotence et déduplication]].
+
+### Décision tranchée : même clé, contenu différent
+
+Le serveur **garde le premier** et renvoie l'existant sans erreur. La question était posée sans être
+fermée par les notes. Verrouillé par un test unitaire sur le handler.
+
+---
+
+## Section 7 — Front (React + TypeScript)
+
+Principe structurant, symétrique de l'hexagone backend : **toute la logique intéressante vit hors de
+React**, en TypeScript pur.
+
+```
+frontend/src/
+├── api/        # client HTTP typé, une fonction par endpoint
+├── realtime/   # RealtimeClient : EventSource, refresh du token, reconnexion
+├── store/      # reducer pur : conversations, messages, dédup, réconciliation
+├── hooks/      # liaison React (useSyncExternalStore)
+└── ui/         # composants, aussi bêtes que possible
+```
+
+`realtime/` et `store/` ne connaissent **rien** de React. Le `RealtimeClient` expose `start()`,
+`stop()`, `on(event)` — un `EventSource` factice suffit à le tester intégralement. Le store est un
+reducer `(state, action) => state` : dédup, réconciliation optimiste et ordre ULID se testent en
+appelant une fonction.
+
+**Écrans** : Login → layout deux colonnes (liste des conversations / conversation ouverte), modale
+« nouvelle conversation » (choix d'un ou plusieurs users → direct ou groupe), panneau membres pour les
+groupes.
+
+**Styles** : CSS Modules + fichier de tokens (couleurs, espacements, typo). Pas de librairie UI : sur
+un portfolio, un chat sobre écrit à la main démontre plus qu'un assemblage de composants tiers.
+
+### Deux points délicats identifiés d'avance
+
+**Le scroll infini vers le haut.** Charger une page plus ancienne fait bondir le scroll. Il faut
+mémoriser `scrollHeight` avant insertion et le restaurer après. Bug classique de toute messagerie :
+anticipé dans le plan plutôt que découvert.
+
+**Le cycle de vie de l'`EventSource`.** Se reconnecter sur `membership.changed`, sur expiration du
+token et sur erreur réseau, sans jamais laisser deux connexions ouvertes (React StrictMode monte les
+effets deux fois en dev — piège garanti). Le `RealtimeClient` est le seul propriétaire de la connexion,
+ce qui rend l'invariant vérifiable par un test.
+
+---
+
+## Section 8 — Tests
+
+L'architecture de la section 3 change la nature des tests : **les use cases sont testables sans base de
+données**, avec des repositories en mémoire implémentant les ports. Les tests fonctionnels ne couvrent
+plus que les adaptateurs.
+
+### Backend — unitaires (aucune I/O)
+
+- **Value objects** : `MessageContent` (vide, espaces seuls, 4001 caractères), `DirectKey` commutatif,
+  `Topic`, refus de croiser `UserId` et `ConversationId`.
+- **Domaine** : `Message::send()` enregistre `MessageWasSent` ; règles d'appartenance et de rôle.
+- **Use cases**, avec repositories en mémoire, `Clock` gelée et `IdGenerator` déterministe :
+  - `SendMessageHandler` — cas nominal ; rejeu du même `ClientMessageId` → même identifiant, **aucun**
+    événement enregistré ; même clé + contenu différent → le premier est conservé ;
+  - `CreateConversationHandler` — direct en double → l'existante ;
+  - `AddMembersHandler` — un `membership.changed` par nouveau membre, sur le bon topic.
+- **`MercureTokenFactory`** : la liste de topics correspond exactement aux appartenances,
+  `/users/{id}/system` toujours présent.
+- **`ConversationVoter`** : membre / non-membre / admin.
+
+### Backend — fonctionnels (`WebTestCase`, base de test, rollback par test)
+
+Chaque endpoint sur trois axes : cas nominal, non authentifié (401), non-membre (403). Plus les
+scénarios qui portent la valeur :
+
+- rejouer le même `POST /messages` → **200**, même `id`, **une seule** publication Mercure ;
+- `POST /conversations` direct en double → 201 puis 200, même `id` ;
+- pagination keyset : 120 messages, remontée par pages de 50, ni trou ni doublon **même quand un
+  message est inséré entre deux pages** ;
+- ajouter un membre → `membership.changed` publié sur `/users/{id}/system` du **nouveau** membre ;
+- publication **après commit** : un handler qui échoue après l'insert ne publie rien.
+
+`EventPublisher` est remplacé par un espion en mémoire : on assert le topic **et** la charge utile.
+**Aucun hub Mercure n'est nécessaire en CI.**
+
+### Front — Vitest
+
+Le reducer (dédup par `client_message_id`, dédup par `id`, ordre ULID, insertion d'une page ancienne en
+tête) et le `RealtimeClient` avec un `EventSource` factice (refresh à l'expiration, reconnexion sur
+`membership.changed`, jamais deux connexions simultanées).
+
+### Pas de Playwright
+
+Choix assumé. En contrepartie, le README documente une vérification manuelle explicite : deux
+navigateurs, Alice envoie, Bob reçoit sans rafraîchir.
+
+### CI GitHub Actions
+
+Un workflow : `phpunit` (service Postgres), `vitest`, **`deptrac`**, PHPStan niveau 8, PHP-CS-Fixer.
+`deptrac` est ce qui empêche l'architecture de se dégrader silencieusement.
+
+---
+
+## Section 9 — Hors périmètre, explicitement
+
+Accusés distribué/lu, présence, typing, Redis · édition, suppression, tombstones · médias, MinIO ·
+recherche · rate limiting, modération · E2E · notifications push · reprise `Last-Event-ID` (le format
+d'événement la prépare, on ne l'implémente pas) · OAuth (le schéma la prépare, on ne la câble pas) ·
+CQRS avec read model séparé (T5) · déploiement en production.
+
+---
+
+## Critères d'acceptation de la tranche 1
+
+1. `make up` lève les 5 services ; `make migrate fixtures` prépare une base jouable.
+2. Deux navigateurs, deux utilisateurs : Alice envoie un message, Bob le voit **sans rafraîchir**.
+3. Alice crée un groupe et y ajoute Carol ; Carol le voit apparaître **sans rafraîchir** (chemin
+   `membership.changed`).
+4. Couper le réseau, envoyer, rétablir : un seul message en base, un seul affiché.
+5. Remonter l'historique d'une conversation de 200 messages : pages successives, ni trou ni doublon.
+6. `make qa` (phpunit + vitest + deptrac + phpstan + cs-fixer) est vert.
+
+## Questions restées ouvertes
+
+Aucune bloquante. Deux points seront tranchés à l'implémentation, sans impact sur l'architecture :
+
+- la bibliothèque ULID côté front (`ulid` ou `ulidx`) ;
+- la stratégie exacte de dispatch après commit (middleware Messenger dédié ou listener Doctrine
+  `postFlush`) — les deux satisfont la contrainte de la section 3.7.
