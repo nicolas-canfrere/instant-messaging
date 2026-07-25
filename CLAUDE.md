@@ -51,6 +51,16 @@ Règle de dépendance : `Infrastructure` → `Application` → `Domain`. Jamais 
 l'être.** Repositories écrits à la main, mappers explicites `fromRow()` / `toRow()`,
 migrations en SQL explicite.
 
+**SQL pur, pas de `QueryBuilder`.** Requêtes littérales passées à `executeQuery()` /
+`executeStatement()`. On assume PostgreSQL : `ON CONFLICT`, `RETURNING`, index partiels sont
+les bienvenus, aucune portabilité recherchée.
+
+- **Toujours des paramètres liés**, jamais de concaténation de valeurs.
+- Listes `IN (...)` : `ArrayParameterType` de DBAL, ne pas générer les placeholders à la main.
+- Chaque requête vit dans le repository ou la classe de query qui l'utilise.
+- Le mapper est le point unique où la ligne brute devient un type précis (PHPStan `max`).
+- Idempotence : `ON CONFLICT … DO NOTHING RETURNING id`, pas d'exception rattrapée.
+
 ### CQS (pas CQRS)
 
 | | Écriture | Lecture |

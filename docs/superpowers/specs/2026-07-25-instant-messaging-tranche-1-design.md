@@ -453,6 +453,36 @@ introduit. Sans ORM, le problème n'existe pas : les objets de domaine sont du P
 générées par diff. Sur 4 tables c'est un avantage — les index, les contraintes uniques partielles et le
 `NULL` multiple de `direct_key` sont écrits intentionnellement, pas déduits.
 
+#### SQL pur, pas de QueryBuilder
+
+**Décision** : les requêtes sont écrites en **SQL littéral**, passé à `Connection::executeQuery()` /
+`executeStatement()`. Le `QueryBuilder` de DBAL n'est pas utilisé.
+
+Motif : une requête lue d'un bloc dit immédiatement quel index elle emprunte. Une requête assemblée par
+appels chaînés oblige à la reconstituer mentalement — et sur un portfolio, la requête keyset de la
+section 4 doit être lisible telle quelle. Le `QueryBuilder` sert à composer dynamiquement des filtres
+optionnels ; la tranche 1 n'en a aucun.
+
+**On assume Postgres.** Aucune tentative de portabilité : `ON CONFLICT`, index unique partiel,
+`RETURNING` sont utilisés sans complexe. Prétendre rester agnostique tout en ciblant un seul SGBD
+coûterait de la lisibilité pour une flexibilité que personne n'utilisera.
+
+**Règles non négociables :**
+
+| Règle | Raison |
+|---|---|
+| **Toujours des paramètres liés**, jamais de concaténation de valeurs | injection SQL — la contrepartie directe du SQL écrit à la main |
+| Listes `IN (...)` via `ArrayParameterType` de DBAL | générer les placeholders à la main est la source d'erreur classique ; c'est le seul endroit où l'abstraction DBAL est le bon outil |
+| Chaque requête vit dans le repository ou la classe de query qui l'utilise | pas de « dépôt central de SQL » déconnecté de son consommateur |
+| Le résultat brut est typé au passage du mapper | PHPStan `max` : `fetchAssociative()` renvoie un type très large, il est resserré en un point unique |
+
+**Conséquence sur l'idempotence** (section 6) : plutôt que de provoquer puis rattraper une
+`UniqueConstraintViolationException`, l'insert s'écrit
+`INSERT … ON CONFLICT (sender_id, client_message_id) DO NOTHING RETURNING id`. Zéro ligne retournée
+signifie « déjà présent » → un `SELECT` récupère l'existant. Le cas nominal **et** le rejeu passent par
+du contrôle de flux ordinaire, pas par une exception — plus lisible, et l'intention est portée par le
+SQL lui-même.
+
 **Exception pragmatique documentée** : `Domain/` dépend de `symfony/uid` pour les ULID. C'est une
 bibliothèque autonome, pas un framework ; réimplémenter un générateur ULID serait du zèle sans bénéfice.
 L'exception est whitelistée explicitement dans `deptrac.yaml`. C'est désormais la **seule**.
@@ -616,8 +646,9 @@ d'accès disparaîtrait.
 2. Affichage optimiste immédiat, statut « envoi… »
 3. POST /api/conversations/{id}/messages
 4. command.bus → SendMessageHandler, dans une transaction :
-   ├─ succès              → INSERT + MAJ pointeur, MessageWasSent enregistré  → 201
-   └─ violation d'unicité → SELECT l'existant, AUCUN événement                → 200
+   INSERT … ON CONFLICT (sender_id, client_message_id) DO NOTHING RETURNING id
+   ├─ une ligne  → MAJ pointeur, MessageWasSent enregistré        → 201
+   └─ zéro ligne → SELECT l'existant, AUCUN événement enregistré  → 200
 5. Après commit : le listener publie sur Mercure (uniquement si événement)
 6. Front réconcilie par client_message_id → statut « envoyé », adopte l'ULID serveur
 7. Échec réseau : retry backoff exponentiel + jitter, MÊME client_message_id
