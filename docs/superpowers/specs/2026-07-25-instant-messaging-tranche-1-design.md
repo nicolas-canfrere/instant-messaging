@@ -27,6 +27,7 @@ Les 17 notes du vault représentent plusieurs projets. Découpage retenu :
 | Sujet | Décision |
 |---|---|
 | Backend | Symfony 7 / PHP 8.4, **contrôleurs manuels** (pas d'API Platform : on veut voir le code, pas la config) |
+| Persistance | **Doctrine DBAL uniquement, sans ORM** (section 3.5) |
 | Architecture backend | **Hexagonale par contexte + CQS**, value objects systématiques (section 3) |
 | Frontend | React + TypeScript, Vite, **Tailwind CSS** |
 | Versionnement | **Monorepo**, un seul dépôt git (section 1.5) |
@@ -117,9 +118,48 @@ coûterait :
 se justifiera quand une couture stable aura son propre cycle de vie — service média (T4), client mobile
 — pas avant.
 
-**Hygiène de dépôt en T1** (utile en solo, indispensable si le projet s'ouvre) : commits conventionnels,
-CI par chemin (`backend/**` ne déclenche pas `vitest`), branches courtes. `CODEOWNERS` et la branch
-protection viendront s'il y a des contributeurs — inutiles en solo.
+### 1.6 Workflow git
+
+**Règle absolue : aucun commit direct sur `main`.** Tout passe par une branche, même un changement
+d'une ligne. `main` n'avance que par merge.
+
+| Convention | Règle |
+|---|---|
+| Branches | `feat/<story>`, `fix/<sujet>`, `docs/<sujet>`, `chore/<sujet>` |
+| Commits | conventionnels (`feat(message): …`), impératif, en français |
+| Taille | **petits commits relisibles** — voir ci-dessous |
+| Merge | `main` ne reçoit que des merges de branches |
+
+**Petits commits, beaucoup de user stories.** Contrainte explicite du projet : préférer une story
+étroite et complète à une story large. Une story = une branche = idéalement 1 à 3 commits, chacun
+relisible d'une traite. Concrètement, en tranche 1 : « créer un direct » et « créer un groupe » sont
+deux stories, pas une. « Envoyer un message » et « rendre l'envoi idempotent » sont deux stories, la
+seconde arrivant avec son test de rejeu. Le plan d'implémentation découpera à ce grain.
+
+Corollaire : chaque story doit laisser le dépôt dans un état vert (`make qa`). Une story qui ne peut pas
+être verte seule est mal découpée.
+
+`CODEOWNERS` et la branch protection GitHub viendront s'il y a des contributeurs — inutiles en solo, la
+règle « pas de commit sur `main` » se tient à la discipline. La CI par chemin (`backend/**` ne déclenche
+pas `vitest`) est en place dès T1.
+
+### 1.7 Répartition des responsabilités
+
+| Périmètre | Qui |
+|---|---|
+| Bootstrap Symfony + installation des paquets Composer | **Nicolas** |
+| Code backend (domaine, use cases, adaptateurs, tests) | Claude |
+| Frontend intégral (setup Vite compris) | Claude — Nicolas est novice sur cette partie |
+| Infra Docker, Caddy, Mercure | Claude |
+| Revue et validation | Nicolas |
+
+Le plan d'implémentation démarre donc **après** le bootstrap Symfony et suppose les paquets déjà
+installés. La liste exacte des paquets requis est fournie avec le plan.
+
+Le frontend étant hors zone de confort de Nicolas, le code front doit être **commenté plus
+généreusement que le back** sur les points non évidents (cycle de vie de l'`EventSource`, dédup du
+store, restauration du scroll), et les revues front doivent expliquer le *pourquoi*, pas seulement le
+*quoi*.
 
 ---
 
@@ -215,8 +255,8 @@ src/Message/
 │   └── Query/GetMessagePage.php  GetMessagePageHandler.php  MessageView.php
 └── Infrastructure/
     ├── Http/SendMessageController.php  GetMessagesController.php
-    ├── Doctrine/DoctrineMessageRepository.php  Message.orm.xml  Type/MessageIdType.php
-    └── Dbal/SqlMessagePageQuery.php
+    ├── Persistence/DbalMessageRepository.php  MessageMapper.php
+    └── Persistence/SqlMessagePageQuery.php
 ```
 
 **Règle de dépendance** : `Domain` ne dépend de rien. `Application` dépend de `Domain`.
@@ -226,7 +266,7 @@ src/Message/
 
 | Port | Type | Implémentation T1 |
 |---|---|---|
-| `ConversationRepository`, `MessageRepository`, `UserRepository` | secondaire | Doctrine ORM |
+| `ConversationRepository`, `MessageRepository`, `UserRepository` | secondaire | Doctrine **DBAL** + mappers écrits à la main |
 | `EventPublisher` | secondaire | Mercure (`Realtime/Infrastructure`) |
 | `Clock` | secondaire | horloge système |
 | `IdGenerator` | secondaire | ULID via `symfony/uid` |
@@ -244,7 +284,7 @@ pagination keyset sans flakiness.
 |---|---|---|
 | Objet | `SendMessage` (command) | `GetMessagePage` (query) |
 | Traverse le domaine | oui | **non** |
-| Persistance | repository → Doctrine ORM | SQL direct via DBAL |
+| Persistance | repository → DBAL + mapper | SQL direct via DBAL → DTO |
 | Retour | rien (ou l'identifiant créé) | DTO de lecture (`MessageView`) |
 | Bus | `command.bus` | `query.bus` |
 
@@ -253,15 +293,15 @@ de projections asynchrones. La distinction est explicite dans le README — c'es
 de nuance qu'un relecteur technique cherche. Le vrai read model apparaîtra en T5
 ([[Recherche dans l'historique]]).
 
-**Pourquoi les queries contournent le domaine** : hydrater des entités Doctrine pour les resérialiser
-en JSON est du gaspillage pur, et cela force le domaine à exposer des getters dont il n'a pas besoin.
-Le SQL de lecture rend l'index `(conversation_id, id DESC)` visible dans le code au lieu de le laisser
-à la merci de l'ORM.
+**Pourquoi les queries contournent le domaine** : reconstruire des objets de domaine pour les
+resérialiser en JSON est du gaspillage pur, et cela force le domaine à exposer des getters dont il n'a
+pas besoin. Le SQL de lecture rend l'index `(conversation_id, id DESC)` visible dans le code.
 
-**Deux bus Messenger, synchrones**, avec le middleware `doctrine_transaction` sur `command.bus`
-uniquement. Ce n'est pas décoratif : c'est ce qui garantit que l'insert du message et la mise à jour du
-pointeur `last_message_*` sont dans la même transaction, sans un seul `beginTransaction()` dans un
-handler.
+**Deux bus Messenger, synchrones.** Le `command.bus` porte un middleware transactionnel **écrit pour le
+projet** (`Connection::transactional()` de DBAL — le middleware `doctrine_transaction` de Symfony
+suppose l'ORM, cf. section 3.5). Ce n'est pas décoratif : c'est ce qui garantit que l'insert du message
+et la mise à jour du pointeur `last_message_*` sont dans la même transaction, sans un seul
+`beginTransaction()` dans un handler.
 
 ### 3.4 Value objects — la fin de la primitive obsession
 
@@ -286,20 +326,52 @@ handler.
   y serait un bug de sécurité silencieux : le message part sur un topic auquel personne n'est abonné,
   ou pire, sur un topic mal cloisonné.
 
-Chaque VO d'identifiant a son **type Doctrine custom** — la persistance reste transparente, le domaine
-ignore la base.
+La conversion VO ↔ colonne se fait dans les **mappers** de la couche Infrastructure (section 3.5), pas
+dans des types Doctrine : le domaine ignore totalement la base.
 
-### 3.5 Garder le domaine pur : mapping XML
+### 3.5 Persistance : DBAL, sans ORM
 
-Les entités de domaine sont mappées en **XML** (`Message.orm.xml`), pas en attributs PHP. Des attributs
-`#[ORM\Entity]` dans `Domain/` coupleraient le domaine à Doctrine — l'hexagone serait décoratif.
+**Décision** : `doctrine/dbal` et `doctrine/migrations`, **pas `doctrine/orm`**.
 
-**Coût assumé** : le mapping XML est plus verbeux et moins bien outillé par l'IDE. C'est le prix d'une
-règle de dépendance réellement respectée plutôt qu'affichée.
+C'est ce qui rend l'hexagone réel plutôt qu'affiché. Avec l'ORM il aurait fallu du mapping XML pour
+éviter les attributs `#[ORM\Entity]` dans `Domain/`, et des types Doctrine custom pour chaque VO —
+c'est-à-dire beaucoup de configuration dont le seul objectif est de neutraliser le couplage que l'ORM
+introduit. Sans ORM, le problème n'existe pas : les objets de domaine sont du PHP nu.
+
+| Rôle | Composant | Emplacement |
+|---|---|---|
+| Reconstruire un objet de domaine depuis une ligne | `MessageMapper::fromRow()` | `Infrastructure/Persistence` |
+| Aplatir un objet de domaine en colonnes | `MessageMapper::toRow()` | idem |
+| `INSERT` / `UPDATE` explicites | `DbalMessageRepository` | idem |
+| Lecture optimisée → DTO | `SqlMessagePageQuery` | idem |
+
+**Ce qu'on gagne :**
+
+- `Domain/` est vraiment pur — `deptrac` n'a même plus besoin de whitelister Doctrine.
+- Chaque requête SQL est visible et relisible. Sur un portfolio, montrer une requête keyset indexée vaut
+  mieux que montrer une annotation qui en génère une.
+- Les VO d'identifiant se convertissent en un endroit unique, le mapper. Aucun type Doctrine à écrire.
+- Plus de magie de flush : ce qui part en base est ce qu'on a écrit, quand on l'a écrit. Le
+  franchissement d'agrégat de la section 3.6 devient deux `UPDATE`/`INSERT` explicites dans une
+  transaction explicite — bien plus lisible qu'un `flush()` qui décide seul.
+
+**Ce qu'on perd, et pourquoi c'est acceptable ici :**
+
+| Perte | Impact sur T1 |
+|---|---|
+| Change tracking automatique | Les repositories font des `INSERT`/`UPDATE` explicites — 4 tables, aucun graphe d'objets complexe |
+| Lazy loading, identity map | Le fan-out en pull ne charge jamais de graphe profond ; on ne chargeait rien en cascade |
+| `DoctrineFixturesBundle` | Fixtures écrites en SQL/DBAL dans une commande console — quelques dizaines de lignes |
+| Middleware `doctrine_transaction` | Remplacé par un middleware Messenger maison sur `Connection::transactional()` (section 3.3) |
+| Repositories générés | Écrits à la main — c'est précisément ce qu'on veut montrer |
+
+`doctrine/migrations` s'utilise **sans l'ORM** : les migrations sont écrites en SQL explicite plutôt que
+générées par diff. Sur 4 tables c'est un avantage — les index, les contraintes uniques partielles et le
+`NULL` multiple de `direct_key` sont écrits intentionnellement, pas déduits.
 
 **Exception pragmatique documentée** : `Domain/` dépend de `symfony/uid` pour les ULID. C'est une
-bibliothèque autonome, pas un framework ; réimplémenter un générateur ULID serait du zèle sans
-bénéfice. L'exception est whitelistée explicitement dans `deptrac.yaml`.
+bibliothèque autonome, pas un framework ; réimplémenter un générateur ULID serait du zèle sans bénéfice.
+L'exception est whitelistée explicitement dans `deptrac.yaml`. C'est désormais la **seule**.
 
 ### 3.6 Agrégats et frontières
 
@@ -330,6 +402,11 @@ commit** de la transaction, et c'est le listener qui appelle `EventPublisher`.
 pousser aux clients un message qu'un rollback fera ensuite disparaître de la base. Les destinataires
 verraient un message qui n'existe pas. Le bug serait rare, non reproductible, et très coûteux à
 diagnostiquer.
+
+**Comment, concrètement** : le middleware transactionnel du `command.bus` (section 3.3) collecte les
+événements enregistrés pendant la transaction et les dispatche **après** le `commit`. L'absence d'ORM
+simplifie : plus de listener `postFlush` ni de cycle de vie Doctrine à comprendre — un seul middleware,
+lisible d'un bout à l'autre.
 
 Effet de bord agréable : le rejeu idempotent (violation d'unicité → on renvoie l'existant) n'enregistre
 aucun événement, donc **ne republie rien**. La règle de la section 6 tombe de la structure au lieu
@@ -592,8 +669,8 @@ CQRS avec read model séparé (T5) · déploiement en production.
 
 ## Questions restées ouvertes
 
-Aucune bloquante. Deux points seront tranchés à l'implémentation, sans impact sur l'architecture :
+Aucune bloquante. Un point sera tranché à l'implémentation, sans impact sur l'architecture : la
+bibliothèque ULID côté front (`ulid` ou `ulidx`).
 
-- la bibliothèque ULID côté front (`ulid` ou `ulidx`) ;
-- la stratégie exacte de dispatch après commit (middleware Messenger dédié ou listener Doctrine
-  `postFlush`) — les deux satisfont la contrainte de la section 3.7.
+La stratégie de dispatch après commit est désormais fermée : middleware Messenger sur le `command.bus`
+(section 3.7), l'abandon de l'ORM ayant supprimé l'alternative `postFlush`.
