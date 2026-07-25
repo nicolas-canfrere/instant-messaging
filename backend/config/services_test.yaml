@@ -1,0 +1,10 @@
+# Substitutions valables uniquement en environnement de test.
+services:
+    # Aucun hub Mercure n'est leve pendant les tests : l'espion permet
+    # d'assertionner le topic ET la charge utile, ce qu'un hub reel ne
+    # permettrait pas sans s'y abonner.
+    App\Tests\Support\InMemoryEventPublisher:
+        public: true
+
+    App\Realtime\Domain\EventPublisherInterface:
+        alias: App\Tests\Support\InMemoryEventPublisher

@@ -40,4 +40,31 @@ abstract class DatabaseTestCase extends WebTestCase
 
         parent::tearDown();
     }
+
+    /** Ouvre une session pour un utilisateur des fixtures. Mot de passe commun : `password`. */
+    protected function login(string $username): void
+    {
+        $this->client->request(
+            'POST',
+            '/api/login',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['username' => $username, 'password' => 'password'], \JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseIsSuccessful();
+    }
+
+    /** @return array<string, mixed> le corps de la reponse courante, decode */
+    protected function json(): array
+    {
+        /** @var array<string, mixed> $decoded */
+        $decoded = json_decode(
+            (string) $this->client->getResponse()->getContent(),
+            true,
+            512,
+            \JSON_THROW_ON_ERROR,
+        );
+
+        return $decoded;
+    }
 }
