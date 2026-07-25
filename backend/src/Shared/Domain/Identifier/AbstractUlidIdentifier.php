@@ -22,13 +22,22 @@ abstract class AbstractUlidIdentifier implements \Stringable
      */
     public const string PATTERN = '/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/';
 
-    protected function __construct(private readonly string $value)
+    /** @var non-empty-string */
+    private readonly string $value;
+
+    protected function __construct(string $value)
     {
         if (1 !== preg_match(self::PATTERN, $value)) {
             throw InvalidIdentifierException::forType(static::class, $value);
         }
+
+        // Apres ce `preg_match`, PHPStan sait deja que la chaine n'est pas vide :
+        // c'est ce qui permet a `toString()` de promettre un `non-empty-string`
+        // sans annotation de complaisance.
+        $this->value = $value;
     }
 
+    /** @return non-empty-string */
     public function __toString(): string
     {
         return $this->value;
@@ -39,6 +48,7 @@ abstract class AbstractUlidIdentifier implements \Stringable
         return new static($value);
     }
 
+    /** @return non-empty-string */
     public function toString(): string
     {
         return $this->value;

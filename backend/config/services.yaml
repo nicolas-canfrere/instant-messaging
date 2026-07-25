@@ -59,6 +59,10 @@ services:
     App\Conversation\Domain\ConversationRepositoryInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationRepository'
     App\Conversation\Application\Query\ConversationReaderInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationReader'
     App\Conversation\Application\MembershipCheckerInterface: '@App\Conversation\Infrastructure\Persistence\DbalMembershipChecker'
+    App\Conversation\Application\LastMessagePointerWriterInterface: '@App\Conversation\Infrastructure\Persistence\DbalLastMessagePointerWriter'
+    App\Message\Domain\MessageRepositoryInterface: '@App\Message\Infrastructure\Persistence\DbalMessageRepository'
+    App\Message\Application\Query\MessageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessageReader'
+    App\Shared\Application\Bus\CommandDispatcherInterface: '@App\Shared\Infrastructure\Bus\CommandDispatcher'
 
     # Le meme convertisseur que celui du serialiseur, pour que les chemins de
     # violation sortent en snake_case comme le reste de l'API.
@@ -75,6 +79,7 @@ services:
     # Contrat publie par Conversation, consomme par Realtime : le seul couplage
     # inter-contextes du projet, et il vise une surface publiee (cf. ADR 0001).
     App\Conversation\Application\Contract\MemberConversationsFinderInterface: '@App\Conversation\Infrastructure\Contract\DbalMemberConversationsFinder'
+    App\Conversation\Application\Contract\ConversationMembershipInterface: '@App\Conversation\Infrastructure\Contract\DbalConversationMembership'
 
     # L'URL que le NAVIGATEUR ouvre, donc celle qui passe par l'origine unique —
     # pas l'URL interne par laquelle le backend publie.

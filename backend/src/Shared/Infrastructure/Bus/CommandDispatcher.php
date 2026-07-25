@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Shared\Infrastructure\Bus;
 
+use App\Shared\Application\Bus\CommandDispatcherInterface;
 use App\Shared\Application\Bus\CommandInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
 
@@ -14,7 +15,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
  * Aucune verification « aucun handler » ici : le bus leve deja
  * NoHandlerForMessageException de lui-meme.
  */
-final readonly class CommandDispatcher
+final readonly class CommandDispatcher implements CommandDispatcherInterface
 {
     public function __construct(private MessageBusInterface $commandBus)
     {

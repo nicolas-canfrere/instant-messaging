@@ -49,7 +49,10 @@ deptrac:
         # Conversation depend de son PROPRE contrat : le producteur possede sa
         # surface publiee, donc il l'implemente.
         Conversation: [Shared, ConversationContract, Vendor]
-        Message: [Shared, Vendor]
+        # Message demande a Conversation si l'expediteur a acces au fil. Cette
+        # ligne est la friction voulue : elargir l'allowlist doit etre un geste
+        # delibere, et ce couplage vise une surface publiee, pas des internes.
+        Message: [Shared, ConversationContract, Vendor]
 
         # Allowlist explicite : ajouter un couplage inter-contextes demande de
         # modifier cette ligne. La friction est voulue.
