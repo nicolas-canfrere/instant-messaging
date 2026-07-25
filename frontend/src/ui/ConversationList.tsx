@@ -79,8 +79,17 @@ export function ConversationList({
                       {conversationTitle(conversation, users, peers)}
                     </span>
                   </span>
-                  <span className="shrink-0 text-xs text-slate-400">
+                  <span className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
                     {conversation.last_message_at ? formatListDate(conversation.last_message_at) : ''}
+
+                    {conversation.unread_count > 0 && (
+                      <span
+                        className="ml-2 rounded-full bg-sky-600 px-2 py-0.5 text-xs font-medium text-white"
+                        aria-label={`${conversation.unread_count} messages non lus`}
+                      >
+                        {conversation.unread_count > 99 ? '99+' : conversation.unread_count}
+                      </span>
+                    )}
                   </span>
                 </span>
 

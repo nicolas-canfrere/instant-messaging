@@ -65,6 +65,7 @@ services:
     App\Message\Domain\MessageRepositoryInterface: '@App\Message\Infrastructure\Persistence\DbalMessageRepository'
     App\Message\Application\Query\MessageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessageReader'
     App\Message\Application\Query\MessagePageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessagePageReader'
+    App\Conversation\Domain\Port\UnreadCounterPortInterface: '@App\Conversation\Infrastructure\Contract\UnreadCounterAdapter'
     App\Shared\Application\Bus\CommandDispatcherInterface: '@App\Shared\Infrastructure\Bus\CommandDispatcher'
 
     # Le meme convertisseur que celui du serialiseur, pour que les chemins de
@@ -84,6 +85,11 @@ services:
     App\Conversation\Application\Contract\MemberConversationsFinderInterface: '@App\Conversation\Infrastructure\Contract\DbalMemberConversationsFinder'
     App\Conversation\Application\Contract\ConversationMembershipInterface: '@App\Conversation\Infrastructure\Contract\DbalConversationMembership'
     App\Conversation\Application\Contract\ConversationPeersFinderInterface: '@App\Conversation\Infrastructure\Contract\DbalConversationPeersFinder'
+
+    # Contrat publie par Message, consomme par Conversation pour le compteur de
+    # non-lus : le couplage est reciproque, mais chaque sens vise une surface
+    # publiee et aucune couche `*Contract` ne depend d'un contexte.
+    App\Message\Application\Contract\UnreadCounterInterface: '@App\Message\Infrastructure\Contract\DbalUnreadCounter'
 
     # L'URL que le NAVIGATEUR ouvre, donc celle qui passe par l'origine unique —
     # pas l'URL interne par laquelle le backend publie.

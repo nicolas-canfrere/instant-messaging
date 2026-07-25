@@ -16,6 +16,7 @@ function conversation(id: string, title: string): ConversationSummary {
     last_message_at: null,
     last_message_preview: null,
     last_message_sender_id: null,
+    unread_count: 0,
   };
 }
 
