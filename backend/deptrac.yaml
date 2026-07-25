@@ -1,30 +1,25 @@
+# Dimension technique : la regle de dependance Infrastructure -> Application -> Domain.
+#
+# Deux fichiers, une dimension chacun (cf. ADR 0001). Deptrac n'accepte qu'un
+# `ruleset` par fichier ; melanger couche et contexte imposerait le produit
+# cartesien des deux, soit une quinzaine de couches des la tranche 1.
 deptrac:
     paths:
         - ./src
-    exclude_files:
-        - '#.*test.*#'
     layers:
-        -
-            name: Controller
-            collectors:
-                -
-                    type: classLike
-                    value: .*Controller.*
-        -
-            name: Repository
-            collectors:
-                -
-                    type: classLike
-                    value: .*Repository.*
-        -
-            name: Service
-            collectors:
-                -
-                    type: classLike
-                    value: .*Service.*
+        - name: Domain
+          collectors: [{ type: directory, value: 'src/[^/]+/Domain/.*' }]
+        - name: Application
+          collectors: [{ type: directory, value: 'src/[^/]+/Application/.*' }]
+        - name: Infrastructure
+          collectors: [{ type: directory, value: 'src/[^/]+/Infrastructure/.*' }]
+        - name: Vendor
+          collectors:
+              - type: classNameRegex
+                value: '#^(Symfony|Doctrine|Psr|Monolog|Lcobucci)\\.*#'
+
     ruleset:
-        Controller:
-            - Service
-        Service:
-            - Repository
-        Repository:
+        # LA regle du projet : le domaine ne depend de rien. Pas meme symfony/uid.
+        Domain: ~
+        Application: [Domain, Vendor]
+        Infrastructure: [Domain, Application, Vendor]
