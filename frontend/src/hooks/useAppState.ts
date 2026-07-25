@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { ulid } from 'ulid';
 import { api } from '../api/client';
+import { retryWithBackoff } from '../api/retry';
 import type { ApiMessage, ConversationSummary, Me, UserSummary } from '../api/types';
 import { RealtimeClient, type EventSourceLike } from '../realtime/RealtimeClient';
 import {
@@ -78,19 +80,26 @@ function readString(payload: Record<string, unknown>, key: string): string {
 /**
  * Charge utile reellement publiee par le backend pour `message.created`
  * (voir `backend/src/Realtime/Application/EventListener/PublishMessageWasSentListener.php`) :
- * `{ id, conversation_id, sender_id, content, created_at }`.
+ * `{ id, conversation_id, sender_id, content, client_message_id, created_at }`.
  *
- * Elle ne transporte PAS de `client_message_id`. On retombe donc sur l'ULID du
- * message comme identifiant client : la premiere passe de deduplication du
- * reducer (par `clientMessageId`) ne peut pas matcher, mais la seconde (par
- * `id` serveur) le fait des que la reponse HTTP de l'envoi a ete acquittee.
+ * Le `client_message_id` transporte est celui que l'expediteur a genere avant
+ * son envoi : c'est lui qui rend effective la PREMIERE passe de deduplication
+ * du reducer. Sans lui, un expediteur dont l'echo SSE arrive avant la reponse
+ * du POST verrait son propre message deux fois — une fois en optimiste, une
+ * fois en recu — jusqu'a l'acquittement.
+ *
+ * Un message venu d'un autre utilisateur porte un `client_message_id` qui ne
+ * correspond a aucun envoi local : la passe 1 ne matche rien, la passe 2 (par
+ * `id` serveur) suffit. Le repli sur l'ULID du message ne sert donc que si le
+ * champ manquait, ce que le backend ne fait plus.
  */
 function toStoredMessage(payload: Record<string, unknown>): StoredMessage {
   const id = readString(payload, 'id');
+  const clientMessageId = readString(payload, 'client_message_id');
 
   return {
     id,
-    clientMessageId: id,
+    clientMessageId: clientMessageId === '' ? id : clientMessageId,
     conversationId: readString(payload, 'conversation_id'),
     senderId: readString(payload, 'sender_id'),
     content: readString(payload, 'content'),
@@ -110,6 +119,9 @@ export type AppState = {
   selectConversation: (conversationId: string) => void;
   loadOlder: () => void;
   refreshConversations: () => Promise<void>;
+  send: (conversationId: string, content: string) => Promise<void>;
+  createDirect: (peerId: string) => Promise<void>;
+  createGroup: (title: string, memberIds: string[]) => Promise<void>;
 };
 
 export function useAppState(me: Me): AppState {
@@ -187,6 +199,79 @@ export function useAppState(me: Me): AppState {
 
     void loadPage(conversationId, thread.nextBefore);
   }, [loadPage]);
+
+  const send = useCallback(
+    async (conversationId: string, content: string): Promise<void> => {
+      // L'identifiant est genere AVANT le premier envoi et reutilise a l'identique
+      // a chaque tentative : c'est la cle d'idempotence. Le regenerer entre deux
+      // essais creerait un second message a chaque reessai reussi.
+      const clientMessageId = ulid();
+
+      dispatch({
+        type: 'message/optimistic',
+        message: {
+          id: null,
+          clientMessageId,
+          conversationId,
+          senderId: me.id,
+          content,
+          createdAt: new Date().toISOString(),
+          status: 'pending',
+        },
+      });
+
+      try {
+        const { id } = await retryWithBackoff(
+          () => api.sendMessage(conversationId, clientMessageId, content),
+          { attempts: 3 },
+        );
+
+        dispatch({ type: 'message/acknowledged', conversationId, clientMessageId, serverId: id });
+      } catch {
+        // Le message reste affiche, marque `failed` : le perdre silencieusement
+        // apres que l'utilisateur l'a vu partir serait le pire des comportements.
+        dispatch({ type: 'message/failed', conversationId, clientMessageId });
+      }
+    },
+    [me.id],
+  );
+
+  /**
+   * Trois gestes indissociables apres une creation, d'ou cette fonction commune :
+   *  1. `resubscribe()` — le JWT courant a ete emis AVANT que la conversation
+   *     existe, il ne couvre donc pas son topic. Sans ce renouvellement, aucun
+   *     message n'arriverait en temps reel dans la conversation qu'on vient de
+   *     creer, jusqu'au rafraichissement periodique du jeton (13 min).
+   *  2. rafraichir la liste — sinon la nouvelle conversation n'apparait pas.
+   *  3. la selectionner — sans quoi l'utilisateur aurait cree dans le vide et
+   *     devrait la retrouver lui-meme dans la colonne de gauche.
+   */
+  const afterCreated = useCallback(
+    async (conversationId: string): Promise<void> => {
+      await clientRef.current?.resubscribe();
+      await refreshConversations();
+      selectConversation(conversationId);
+    },
+    [refreshConversations, selectConversation],
+  );
+
+  const createDirect = useCallback(
+    async (peerId: string): Promise<void> => {
+      const { id } = await api.createDirect(peerId);
+
+      await afterCreated(id);
+    },
+    [afterCreated],
+  );
+
+  const createGroup = useCallback(
+    async (title: string, memberIds: string[]): Promise<void> => {
+      const { id } = await api.createGroup(title, memberIds);
+
+      await afterCreated(id);
+    },
+    [afterCreated],
+  );
 
   // Chargement initial : la liste des conversations et l'annuaire des utilisateurs.
   // L'annuaire sert a nommer l'interlocuteur d'un direct et l'expediteur d'un
@@ -267,5 +352,8 @@ export function useAppState(me: Me): AppState {
     selectConversation,
     loadOlder,
     refreshConversations,
+    send,
+    createDirect,
+    createGroup,
   };
 }

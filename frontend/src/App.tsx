@@ -6,6 +6,7 @@ import { selectThread } from './store/messagesReducer';
 import { ConversationList } from './ui/ConversationList';
 import { ConversationView } from './ui/ConversationView';
 import { LoginScreen } from './ui/LoginScreen';
+import { NewConversationDialog } from './ui/NewConversationDialog';
 
 // Trois etats et non deux : tant que /api/me n'a pas repondu, on ne SAIT pas si
 // la session existe. Afficher l'ecran de connexion pendant ce laps de temps le
@@ -55,8 +56,22 @@ export default function App() {
  * ouvert avant que la session soit connue.
  */
 function Workspace({ me }: { me: Me }) {
-  const { users, peers, conversations, selectedId, messagesState, selectConversation, loadOlder } =
-    useAppState(me);
+  const {
+    users,
+    peers,
+    conversations,
+    selectedId,
+    messagesState,
+    selectConversation,
+    loadOlder,
+    send,
+    createDirect,
+    createGroup,
+  } = useAppState(me);
+
+  // Ouverture du dialogue de creation : etat d'affichage, il ne concerne que
+  // cet ecran et n'a rien a faire dans `useAppState`.
+  const [creating, setCreating] = useState(false);
 
   const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null;
 
@@ -68,6 +83,7 @@ function Workspace({ me }: { me: Me }) {
         peers={peers}
         selectedId={selectedId}
         onSelect={selectConversation}
+        onNewConversation={() => setCreating(true)}
       />
 
       {selected === null ? (
@@ -82,6 +98,17 @@ function Workspace({ me }: { me: Me }) {
           peers={peers}
           meId={me.id}
           onLoadOlder={loadOlder}
+          onSend={(content) => send(selected.id, content)}
+        />
+      )}
+
+      {creating && (
+        <NewConversationDialog
+          users={users}
+          meId={me.id}
+          onCreateDirect={createDirect}
+          onCreateGroup={createGroup}
+          onClose={() => setCreating(false)}
         />
       )}
     </div>
