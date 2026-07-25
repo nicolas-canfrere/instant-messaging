@@ -58,6 +58,7 @@ services:
     App\Realtime\Domain\EventPublisherInterface: '@App\Realtime\Infrastructure\Mercure\MercureEventPublisher'
     App\Realtime\Domain\PresenceStoreInterface: '@App\Realtime\Infrastructure\Presence\RedisPresenceStore'
     App\Conversation\Domain\ConversationRepositoryInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationRepository'
+    App\Conversation\Domain\MembershipRepositoryInterface: '@App\Conversation\Infrastructure\Persistence\DbalMembershipRepository'
     App\Conversation\Application\Query\ConversationReaderInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationReader'
     App\Conversation\Application\MembershipCheckerInterface: '@App\Conversation\Infrastructure\Persistence\DbalMembershipChecker'
     App\Conversation\Application\LastMessagePointerWriterInterface: '@App\Conversation\Infrastructure\Persistence\DbalLastMessagePointerWriter'
