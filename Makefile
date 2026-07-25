@@ -27,6 +27,51 @@ DOCKER_COMPOSE_RUN = $(DOCKER_COMPOSE) --progress quiet run --rm --remove-orphan
 help: ## Display this help
 	@awk 'BEGIN {FS = ":.* ##"; printf "\n\033[1mUsage:\033[0m\n  make \033[32m<target>\033[0m\n"} /^[a-zA-Z_-]+:.* ## / { printf "  \033[33m%-25s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+##@ Stack
+# Point d'entrée d'un poste neuf : de `git clone` à l'application qui tourne.
+# Chaque étape est idempotente, la cible se relance donc sans rien casser.
+# Les étapes sont enchaînées dans la recette et non listées en prérequis :
+# l'ordre est alors garanti même sous `make -j`.
+setup: .env ## Set up a fresh checkout, from clone to running app
+	@$(MAKE) --no-print-directory install
+	@$(MAKE) --no-print-directory build
+	@$(MAKE) --no-print-directory up
+	@$(MAKE) --no-print-directory migrate
+	@$(MAKE) --no-print-directory fixtures
+	@printf '\n\033[32mPret.\033[0m http://localhost:8080 — alice / password\n\n'
+
+# Cible fichier, sans prérequis : make ne l'exécute que si `.env` est absent.
+# C'est ce qui rend `setup` relançable sans écraser un secret déjà en place ni
+# des UID/GID ajustés à la main. La déclarer `.PHONY` la régénérerait à chaque
+# appel — le `.env` est justement le seul fichier qu'on ne veut jamais perdre.
+# (Le nom commençant par un point, l'awk de `.PHONY` en haut ne l'attrape pas.)
+.env:
+	@sed -e "s|^MERCURE_JWT_SECRET=.*|MERCURE_JWT_SECRET=$$(openssl rand -hex 32)|" \
+		-e "s|^USER_ID=.*|USER_ID=$(shell id -u)|" \
+		-e "s|^GROUP_ID=.*|GROUP_ID=$(shell id -g)|" \
+		.env.example > .env
+	@echo ".env cree : secret Mercure tire au hasard, UID/GID de l'hote."
+
+up: ## Start the whole stack in the background
+	@$(DOCKER_COMPOSE) up -d --wait
+
+# Sans `-v` : la base et les données du hub survivent. Pour tout effacer, c'est
+# explicite et ça ne mérite pas de raccourci — `docker compose down -v`.
+down: ## Stop the stack. The database and hub volumes are kept
+	@$(DOCKER_COMPOSE) down --remove-orphans
+
+ps: ## Show the state of every container
+	@$(DOCKER_COMPOSE) ps
+
+build: ## Rebuild the images
+	@$(DOCKER_COMPOSE) build
+
+logs: ## Follow the logs. Usage: make logs SERVICE=backend
+	@$(DOCKER_COMPOSE) logs -f $(SERVICE)
+
+restart: ## Restart a service. Usage: make restart SERVICE=frontend
+	@$(DOCKER_COMPOSE) restart $(SERVICE)
+
 ##@ PHP: Installation
 install: backend/vendor ## Install all necessary things
 
@@ -56,6 +101,30 @@ migrate: ## Run migrations on the dev database. OPTIONS="--dry-run"
 
 migration-status: ## Show which migrations have been applied
 	$(DOCKER_COMPOSE_RUN) backend bin/console doctrine:migrations:list
+
+# La commande commence par un TRUNCATE : elle remet la base de dev dans un état
+# jouable connu (alice, bob, carol — un direct et un groupe), elle ne complète
+# pas l'existant.
+fixtures: ## Wipe the dev database and load a playable data set
+	$(DOCKER_COMPOSE_RUN) backend bin/console app:fixtures:load
+
+##@ Frontend
+# `exec` et non `run --rm` : `node_modules` est un volume anonyme (voir le
+# commentaire dans compose.yaml), donc propre à chaque conteneur. Un `run` en
+# fabriquerait un neuf et jetable, dépourvu de tout paquet installé depuis la
+# construction de l'image — les tests échoueraient sur des dépendances
+# introuvables, sans rapport avec le code testé. D'où la dépendance à `up` :
+# on exécute dans le conteneur qui tourne, le seul qui ait le bon node_modules.
+FRONTEND_EXEC = $(DOCKER_COMPOSE) exec $(DOCKER_COMPOSE_RUN_FLAGS) frontend
+
+front-install: up ## Install the npm dependencies in the running container
+	@$(FRONTEND_EXEC) npm install
+
+front-test: up ## Run the frontend test suite (Vitest)
+	@$(FRONTEND_EXEC) npm test
+
+front-typecheck: up ## Type-check the frontend (tsc --noEmit)
+	@$(FRONTEND_EXEC) npm run typecheck
 
 ##@ Code analysis
 static-code-analysis: ## Code analysis with PHPStan

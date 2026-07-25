@@ -36,12 +36,16 @@ services:
       postgres:
         condition: service_healthy
 
-  # Le Dockerfile de ce service arrive avec la tâche 13. Jusque-là, lever
-  # explicitement les autres : docker compose up -d caddy backend mercure postgres
   frontend:
     build: ./frontend
     volumes:
       - ./frontend:/app
+      # Volume ANONYME, donc propre à chaque conteneur : il masque le
+      # `node_modules` du bind mount pour garder celui construit dans l'image
+      # (dépendances natives compilées pour Alpine, pas pour l'hôte).
+      # Conséquence à connaître : `docker compose run --rm frontend npm …` reçoit
+      # un volume neuf et jetable. Les cibles `front-*` du Makefile passent donc
+      # par `exec` sur le conteneur qui tourne.
       - /app/node_modules
     command: npm run dev -- --host 0.0.0.0
 
