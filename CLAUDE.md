@@ -47,7 +47,7 @@ Hexagonale par contexte borné, CQS, value objects systématiques.
 ```
 backend/src/<Contexte>/
 ├── Domain/           # PHP pur : entités, VO, ports, domain events
-├── Application/      # Command/ et Query/ + leurs handlers
+├── Application/      # Command/ et Query/ + leurs handlers, et leurs ports
 └── Infrastructure/   # Http/, Persistence/ — les adaptateurs
 ```
 
@@ -55,6 +55,11 @@ Contextes : `Identity` · `Conversation` · `Message` · `Realtime` · `Shared`.
 Ils communiquent **par identifiants**, jamais en référençant le `Domain` d'un autre contexte.
 
 Règle de dépendance : `Infrastructure` → `Application` → `Domain`. Jamais l'inverse.
+
+**`Application` ne connaît aucun vendor, à la seule exception des `Psr\*`** — ni `Symfony\`,
+ni `Doctrine\`, ni `Monolog\`. Les PSR sont des interfaces normalisées : en dépendre
+n'attache pas l'application à un framework. Un use case exprime un besoin par un port ;
+`Infrastructure` le réalise. `deptrac.yaml` a donc une couche `Psr` distincte de `Vendor`.
 
 ### Communication inter-contextes — voir [ADR 0001](docs/adr/0001-cross-context-communication.md)
 
@@ -86,8 +91,7 @@ dépendrait de `Message`. Un événement qu'un seul contexte écoute reste chez 
 **Modifier un `*View` ou la charge utile d'un événement partagé est un changement cassant.**
 
 Deux fichiers deptrac : `deptrac.yaml` (dimension technique) et `deptrac-contexts.yaml`
-(dimension contexte + allowlist vers les couches `*Contract`). Les deux tournent dans
-`make qa`.
+(dimension contexte + allowlist vers les couches `*Contract`). `make deptrac` lance les deux.
 
 ### Persistance : DBAL, jamais l'ORM
 
@@ -101,7 +105,9 @@ les bienvenus, aucune portabilité recherchée.
 
 - **Toujours des paramètres liés**, jamais de concaténation de valeurs.
 - Listes `IN (...)` : `ArrayParameterType` de DBAL, ne pas générer les placeholders à la main.
-- Chaque requête vit dans le repository ou la classe de query qui l'utilise.
+- Chaque requête vit dans le repository ou le `Reader` qui l'utilise, **toujours en
+  `Infrastructure`**. Écrire la requête **en entier** : ni constante de liste de colonnes,
+  ni concaténation de fragments — une requête doit se copier telle quelle dans `psql`.
 - Le mapper est le point unique où la ligne brute devient un type précis (PHPStan `max`).
 - Idempotence : `ON CONFLICT … DO NOTHING RETURNING id`, pas d'exception rattrapée.
 
@@ -110,10 +116,29 @@ les bienvenus, aucune portabilité recherchée.
 | | Écriture | Lecture |
 |---|---|---|
 | Bus | `command.bus` | `query.bus` |
+| Message | `{X}Command` | `{X}Query` |
+| Handler | `{X}CommandHandler` | `{X}QueryHandler` |
 | Chemin | domaine + repository | SQL direct → DTO de lecture |
-| Retour | rien, ou l'identifiant créé | DTO |
+| Retour | **`void`, toujours** | DTO |
 
 Une seule base, pas de read model séparé, pas d'event sourcing.
+
+**Un handler de commande ne rend jamais rien.** Pour connaître l'effet d'une écriture, on
+pose ensuite une query — y compris pour récupérer un identifiant créé. C'est la séparation
+CQS, pas une gêne à contourner.
+
+**Pas d'attribut `#[AsMessageHandler]`** : ce serait une dépendance d'`Application` vers
+Messenger. Les handlers implémentent `App\Shared\Application\Bus\CommandHandlerInterface`
+ou `QueryHandlerInterface`, que `_instanceof` dans `services.yaml` tague vers le bon bus. Le
+bus est donc choisi par le **type** du handler.
+
+**`QueryInterface<TResult>` est paramétrée par le type de son résultat**, que
+`QueryDispatcher::ask()` propage. L'appelant reçoit un type précis : ni `assert`, ni `@var`
+côté contrôleur.
+
+**Jamais de SQL dans `Application`**, y compris côté lecture. Le handler de query déclare
+son besoin par un port `{Chose}ReaderInterface` dans `{Contexte}/Application/Query/`, réalisé
+par un `Dbal{Chose}Reader` dans `{Contexte}/Infrastructure/Persistence/`.
 
 ### Nommage (backend)
 
@@ -125,6 +150,12 @@ suffixe), classes abstraites préfixées `Abstract`, traits suffixés `Trait`, e
 suffixées `Exception`. Cas d'enum en `UpperCamelCase` (`ConversationType::Direct`).
 Constantes en `SCREAMING_SNAKE_CASE`. Noms de routes et paramètres de config en
 `snake_case`. PHPDoc : `bool`/`int`/`float`. Une classe par fichier.
+
+Une classe d'`Infrastructure` qui lit du SQL hors d'un repository se suffixe **`Reader`**,
+jamais `Query` : ce mot désigne déjà un message de bus dans `Application/Query/`.
+
+**Construire les chaînes avec `sprintf()`**, jamais par concaténation avec `.` — le gabarit
+complet se lit d'un bloc. Seule exception, les messages de log : voir *Journalisation*.
 
 Le frontend suit les usages TypeScript/React, pas ceux de Symfony.
 
@@ -155,7 +186,9 @@ passe même haché, un e-mail complet. On loggue des **identifiants**, jamais de
 utiles — y compris en `debug`.
 
 **Placeholders `{entre_accolades}`, variables dans le second argument.** Jamais de
-`sprintf`, jamais d'interpolation `"{$var}"`, jamais de concaténation.
+`sprintf`, jamais d'interpolation `"{$var}"`, jamais de concaténation. C'est la seule
+exception à la règle « `sprintf` plutôt que concaténation » du *Nommage* : ici le message
+n'est pas une chaîne à composer, c'est une clé d'agrégation.
 
 ```php
 $logger->info('Message {message_id} envoyé dans la conversation {conversation_id}', [
@@ -253,7 +286,8 @@ Niveau `max` : annoter les génériques (`@return list<MessageView>`), typer pr�
 lignes DBAL (`array{id: string, …}`), aucun `mixed` implicite. Les mappers sont la frontière
 désignée où le tableau brut devient un type précis.
 
-La CI lance `make qa` dans les mêmes conteneurs que le poste de dev — pas de `setup-php`.
+Les portes de qualité : `make static-code-analysis` · `make check-cs` · `make deptrac` ·
+`make test`. Les quatre doivent être vertes avant chaque commit.
 
 ## Commandes
 

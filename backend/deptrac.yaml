@@ -13,13 +13,25 @@ deptrac:
           collectors: [{ type: directory, value: 'src/[^/]+/Application/.*' }]
         - name: Infrastructure
           collectors: [{ type: directory, value: 'src/[^/]+/Infrastructure/.*' }]
+        # Les PSR sont des interfaces normalisees, sans implementation imposee :
+        # en dependre n'attache pas l'application a un framework. C'est la seule
+        # chose exterieure qu'Application a le droit de nommer.
+        - name: Psr
+          collectors:
+              - type: classNameRegex
+                value: '#^Psr\\.*#'
+
         - name: Vendor
           collectors:
               - type: classNameRegex
-                value: '#^(Symfony|Doctrine|Psr|Monolog|Lcobucci)\\.*#'
+                value: '#^(Symfony|Doctrine|Monolog|Lcobucci)\\.*#'
 
     ruleset:
         # LA regle du projet : le domaine ne depend de rien. Pas meme symfony/uid.
         Domain: ~
-        Application: [Domain, Vendor]
-        Infrastructure: [Domain, Application, Vendor]
+
+        # PAS de Vendor ici. Un use case ne connait ni Doctrine ni Messenger :
+        # il exprime un besoin par un port, et l'Infrastructure le realise.
+        Application: [Domain, Psr]
+
+        Infrastructure: [Domain, Application, Psr, Vendor]

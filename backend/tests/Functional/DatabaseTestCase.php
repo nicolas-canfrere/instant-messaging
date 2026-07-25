@@ -26,6 +26,12 @@ abstract class DatabaseTestCase extends WebTestCase
     {
         $this->client = static::createClient();
 
+        // Sans cela, KernelBrowser reconstruit le conteneur avant CHAQUE requete :
+        // la requete HTTP obtiendrait une autre Connection que celle sur laquelle
+        // le test ouvre sa transaction, et ses ecritures seraient commitees pour
+        // de bon. Les donnees d'un test fuiteraient alors dans le suivant.
+        $this->client->disableReboot();
+
         /** @var Connection $connection */
         $connection = static::getContainer()->get(Connection::class);
         $this->connection = $connection;
@@ -52,6 +58,28 @@ abstract class DatabaseTestCase extends WebTestCase
         );
 
         self::assertResponseIsSuccessful();
+    }
+
+    /** Identifiant d'un utilisateur des fixtures, lu via l'annuaire. Necessite une session. */
+    protected function userId(string $username): string
+    {
+        $this->client->request('GET', '/api/users');
+
+        /** @var list<array{id: string, username: string}> $users */
+        $users = json_decode(
+            (string) $this->client->getResponse()->getContent(),
+            true,
+            512,
+            \JSON_THROW_ON_ERROR,
+        );
+
+        foreach ($users as $user) {
+            if ($username === $user['username']) {
+                return $user['id'];
+            }
+        }
+
+        self::fail(sprintf('Utilisateur %s absent de l\'annuaire.', $username));
     }
 
     /** @return array<string, mixed> le corps de la reponse courante, decode */
