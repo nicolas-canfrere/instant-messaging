@@ -26,6 +26,10 @@ services:
             tags:
                 - { name: messenger.message_handler, bus: query.bus }
 
+        App\Shared\Application\Bus\DomainEventListenerInterface:
+            tags:
+                - { name: messenger.message_handler, bus: event.bus }
+
     # makes classes in src/ available to be used as services
     # this creates a service per class whose id is the fully-qualified class name
     App\:
@@ -54,6 +58,13 @@ services:
     App\Realtime\Domain\EventPublisherInterface: '@App\Realtime\Infrastructure\Mercure\MercureEventPublisher'
     App\Conversation\Domain\ConversationRepositoryInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationRepository'
     App\Conversation\Application\Query\ConversationReaderInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationReader'
+    App\Conversation\Application\MembershipCheckerInterface: '@App\Conversation\Infrastructure\Persistence\DbalMembershipChecker'
+
+    # Les identifiants de route arrivent typés dans les contrôleurs, et le voter
+    # reçoit donc un ConversationId, pas une chaîne indistincte.
+    App\Shared\Infrastructure\Http\UlidIdentifierValueResolver:
+        tags:
+            - { name: controller.argument_value_resolver, priority: 150 }
 
     # Contrat publie par Conversation, consomme par Realtime : le seul couplage
     # inter-contextes du projet, et il vise une surface publiee (cf. ADR 0001).

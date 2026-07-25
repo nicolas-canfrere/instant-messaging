@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Conversation\Infrastructure\Persistence;
 
+use App\Conversation\Application\Query\ConversationDetailView;
 use App\Conversation\Application\Query\ConversationReaderInterface;
 use App\Conversation\Application\Query\ConversationView;
 use App\Conversation\Domain\DirectKey;
@@ -52,6 +53,44 @@ final readonly class DbalConversationReader implements ConversationReaderInterfa
             ),
             $rows,
         );
+    }
+
+    public function detailFor(ConversationId $conversationId, UserId $requestedBy): ?ConversationDetailView
+    {
+        /** @var array{id: string, type: string, title: string|null}|false $row */
+        $row = $this->connection->fetchAssociative(
+            // La jointure sur l'appartenance du demandeur EST le controle
+            // d'acces : pas de ligne, pas de reponse — et donc aucun moyen de
+            // distinguer « n'existe pas » de « pas pour vous ».
+            <<<'SQL'
+                SELECT c.id, c.type, c.title
+                FROM conversations c
+                INNER JOIN conversation_members cm
+                        ON cm.conversation_id = c.id AND cm.user_id = :user_id
+                WHERE c.id = :conversation_id
+                SQL,
+            [
+                'conversation_id' => $conversationId->toString(),
+                'user_id' => $requestedBy->toString(),
+            ],
+        );
+
+        if (false === $row) {
+            return null;
+        }
+
+        /** @var list<array{user_id: string, role: string}> $members */
+        $members = $this->connection->fetchAllAssociative(
+            <<<'SQL'
+                SELECT user_id, role
+                FROM conversation_members
+                WHERE conversation_id = :conversation_id
+                ORDER BY joined_at ASC
+                SQL,
+            ['conversation_id' => $conversationId->toString()],
+        );
+
+        return new ConversationDetailView($row['id'], $row['type'], $row['title'], $members);
     }
 
     public function directIdForKey(DirectKey $key): ?ConversationId

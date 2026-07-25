@@ -16,6 +16,8 @@ use Symfony\Component\Messenger\Middleware\StackInterface;
  */
 final readonly class LoggingMiddleware implements MiddlewareInterface
 {
+    use ClassifiesBusFailuresTrait;
+
     public function __construct(
         private LoggerInterface $logger,
         private ClockInterface $clock,
@@ -32,11 +34,17 @@ final readonly class LoggingMiddleware implements MiddlewareInterface
         try {
             $result = $stack->next()->handle($envelope, $stack);
         } catch (\Throwable $throwable) {
-            $this->logger->error('Echec de {message_class} apres {duration_ms} ms', [
+            $context = [
                 'message_class' => $messageClass,
                 'duration_ms' => $this->elapsedMs($startedAt),
                 'exception' => $throwable,
-            ]);
+            ];
+
+            if ($this->isExpectedOutcome($throwable)) {
+                $this->logger->warning('{message_class} rejete apres {duration_ms} ms', $context);
+            } else {
+                $this->logger->error('Echec de {message_class} apres {duration_ms} ms', $context);
+            }
 
             throw $throwable;
         }

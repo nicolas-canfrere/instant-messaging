@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Conversation\Domain;
 
+use App\Shared\Domain\Event\MembershipChanged;
 use App\Shared\Domain\Event\RecordsEventsTrait;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
@@ -48,6 +49,32 @@ final class Conversation
                 new Member($peer, MemberRole::Admin, $now),
             ],
         );
+    }
+
+    /**
+     * Le createur est admin ; les autres sont simples membres. S'il se liste
+     * lui-meme parmi `$others`, il n'apparait qu'une fois — et comme admin.
+     *
+     * @param list<UserId> $others
+     */
+    public static function group(
+        ConversationId $id,
+        string $title,
+        UserId $creator,
+        array $others,
+        \DateTimeImmutable $now,
+    ): self {
+        $members = [new Member($creator, MemberRole::Admin, $now)];
+
+        foreach ($others as $userId) {
+            if ($userId->equals($creator)) {
+                continue;
+            }
+
+            $members[] = new Member($userId, MemberRole::Member, $now);
+        }
+
+        return new self($id, ConversationType::Group, $title, null, $creator, $now, $members);
     }
 
     /** @param list<Member> $members */
@@ -125,5 +152,42 @@ final class Conversation
         }
 
         return false;
+    }
+
+    /** Sans effet si la personne est deja membre : aucun evenement n'est enregistre. */
+    public function addMember(UserId $userId, \DateTimeImmutable $now): void
+    {
+        $this->assertIsGroup();
+
+        if ($this->hasMember($userId)) {
+            return;
+        }
+
+        $this->members[] = new Member($userId, MemberRole::Member, $now);
+        $this->recordEvent(new MembershipChanged($this->id, $userId, 'joined'));
+    }
+
+    public function removeMember(UserId $userId): void
+    {
+        $this->assertIsGroup();
+
+        if (!$this->hasMember($userId)) {
+            return;
+        }
+
+        $this->members = array_values(array_filter(
+            $this->members,
+            static fn(Member $member): bool => !$member->userId->equals($userId),
+        ));
+
+        $this->recordEvent(new MembershipChanged($this->id, $userId, 'left'));
+    }
+
+    /** Un direct a exactement deux participants, fixes pour toujours. */
+    private function assertIsGroup(): void
+    {
+        if (ConversationType::Group !== $this->type) {
+            throw NotAGroupException::create();
+        }
     }
 }
