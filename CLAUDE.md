@@ -54,17 +54,27 @@ Ils communiquent **par identifiants**, jamais en référençant le `Domain` d'un
 
 Règle de dépendance : `Infrastructure` → `Application` → `Domain`. Jamais l'inverse.
 
-**Les identifiants partagés vivent dans `Shared/Domain/Identifier/`** : `UserId`,
-`ConversationId`, `MessageId`. Ils sont le langage commun entre contextes — `Conversation` a
-besoin de `UserId`, `Message` a besoin de `ConversationId`. Les dupliquer par contexte serait
-pire. Les VO **spécifiques** restent chez eux : `MessageContent`, `ClientMessageId`,
-`DirectKey`, `MemberRole`, `ConversationType`, `Topic`.
+### Règle : tout ce qui est inter-contexte vit dans `Shared`
 
-**Une seule dérogation inter-contextes**, explicite dans `deptrac.yaml` :
-`Realtime/Application` référence les *domain events* des autres contextes
-(`MembershipChanged`, `MessageWasSent`) — un abonné doit connaître l'événement auquel il
-s'abonne. **Ne pas élargir cette dérogation** ; toute autre communication passe par des
-identifiants.
+**Aucun contexte ne référence jamais un autre contexte. Zéro exception, zéro dérogation
+deptrac.** Dès qu'un élément est consommé par plus d'un contexte, il remonte dans `Shared` —
+c'est ce qui rend la règle deptrac énonçable sans « sauf ».
+
+| Élément | Emplacement |
+|---|---|
+| Identifiants (`UserId`, `ConversationId`, `MessageId`) | `Shared/Domain/Identifier/` |
+| Domain events écoutés par un autre contexte (`MessageWasSent`, `MembershipChanged`) | `Shared/Domain/Event/` |
+| Adaptateur de sécurité utilisé par tous les contrôleurs (`SecurityUser`) | `Shared/Infrastructure/Security/` |
+| VO **spécifiques** (`MessageContent`, `ClientMessageId`, `DirectKey`, `MemberRole`, `ConversationType`, `Topic`) | dans leur contexte |
+
+**Corollaire sur les événements partagés** : leur charge utile ne peut contenir que des types
+de `Shared` et des scalaires PHP — jamais un VO local. `MessageWasSent` transporte donc le
+contenu en `string`, pas en `MessageContent`. Un événement qui franchit une frontière est un
+**contrat** : il s'exprime dans le vocabulaire commun, sinon `Shared` dépendrait d'un contexte
+et l'inversion serait pire que le problème.
+
+Un événement qu'un seul contexte écoute reste chez lui. Il ne remonte que le jour où un
+deuxième contexte s'y abonne.
 
 ### Persistance : DBAL, jamais l'ORM
 

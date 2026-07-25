@@ -346,6 +346,33 @@ src/Message/
 **Règle de dépendance** : `Domain` ne dépend de rien. `Application` dépend de `Domain`.
 `Infrastructure` dépend des deux. Jamais l'inverse.
 
+**Règle inter-contextes : aucun contexte n'en référence un autre. Zéro exception.** Dès qu'un
+élément est consommé par plus d'un contexte, il remonte dans `Shared`.
+
+| Élément partagé | Emplacement |
+|---|---|
+| Identifiants — `UserId`, `ConversationId`, `MessageId` | `Shared/Domain/Identifier/` |
+| Domain events écoutés par un autre contexte — `MessageWasSent`, `MembershipChanged` | `Shared/Domain/Event/` |
+| Adaptateur de sécurité utilisé par tous les contrôleurs — `SecurityUser` | `Shared/Infrastructure/Security/` |
+| VO spécifiques — `MessageContent`, `DirectKey`, `Topic`… | dans leur contexte |
+
+**Conséquence sur la charge utile des événements partagés** : elle ne peut contenir que des
+types de `Shared` et des scalaires PHP, jamais un VO local. `MessageWasSent` transporte le
+contenu en `string`, pas en `MessageContent`.
+
+C'est le bon comportement, pas une concession : un événement qui franchit une frontière est un
+**contrat**, et un contrat s'exprime dans le vocabulaire commun aux deux parties. Le mettre
+dans `Shared` tout en le laissant transporter un VO local ferait dépendre `Shared` d'un
+contexte — une inversion pire que le problème d'origine.
+
+Un événement qu'un seul contexte écoute reste chez lui ; il ne remonte que le jour où un
+deuxième s'y abonne.
+
+**Ce que cette règle achète** : le `ruleset` deptrac s'énonce uniformément — chaque couche ne
+voit que sa propre couche inférieure et `Shared`. Aucune ligne ne commence par « sauf ». Une
+règle sans dérogation ne se négocie pas et n'accueille pas de deuxième cas particulier six
+mois plus tard.
+
 ### 3.2 Ports de l'hexagone
 
 | Port | Type | Implémentation T1 |
@@ -564,8 +591,8 @@ d'être un `if` à ne pas oublier.
 - `Domain` référence **quoi que ce soit hors de lui-même et du cœur de PHP** — aucune whitelist
   (section 3.5) ;
 - `Application` référence `Infrastructure` ;
-- un contexte référence le `Domain` d'un autre contexte (ils communiquent par identifiants, pas par
-  objets).
+- **un contexte en référence un autre, à quelque couche que ce soit** — la règle de la section 3.1
+  n'admet aucune dérogation : ce qui est partagé remonte dans `Shared`.
 
 Sans cet outil, la règle de dépendance se dégrade en deux semaines. **C'est ce qui fait la différence
 entre une architecture hexagonale et un dossier nommé `Domain`** — et c'est vérifiable par un

@@ -19,7 +19,8 @@ Ces contraintes s'appliquent à **chaque** tâche, sans rappel.
 - **Aucun commit sur `main`.** Une story = une branche (`feat/…`, `chore/…`) = 1 à 3 commits. Chaque story laisse le dépôt vert.
 - **Ni PHP ni Node sur l'hôte.** Toute commande passe par un conteneur. Les commandes de ce plan sont écrites en `docker compose` : elles fonctionnent quel que soit le contenu du `Makefile`. Si une cible `make` équivalente existe, la préférer — **lire le `Makefile` avant**, ne jamais inventer de cible.
 - **`Domain/` a zéro dépendance externe.** Aucun `use Symfony\…`, `Doctrine\…`, `Psr\…`. Aucune exception.
-- **Règle de dépendance :** `Infrastructure` → `Application` → `Domain`. Jamais l'inverse. Un contexte ne référence jamais le `Domain` d'un autre contexte.
+- **Règle de dépendance :** `Infrastructure` → `Application` → `Domain`. Jamais l'inverse.
+- **Règle inter-contextes : aucun contexte n'en référence un autre, à aucune couche. Zéro dérogation deptrac.** Tout élément partagé remonte dans `Shared` : identifiants (`Shared/Domain/Identifier/`), domain events écoutés ailleurs (`Shared/Domain/Event/`), `SecurityUser` (`Shared/Infrastructure/Security/`). La charge utile d'un événement partagé n'utilise que des types de `Shared` et des scalaires — jamais un VO local.
 - **Nommage Symfony :** interfaces suffixées `Interface`, classes abstraites préfixées `Abstract`, exceptions suffixées `Exception`, cas d'enum en `UpperCamelCase`, constantes en `SCREAMING_SNAKE_CASE`, routes en `snake_case`.
 - **SQL littéral**, pas de `QueryBuilder`. Paramètres liés obligatoires. PostgreSQL assumé (`ON CONFLICT`, `RETURNING`).
 - **PHPStan niveau `max`.** Génériques annotés (`@return list<T>`), lignes DBAL typées (`array{…}`) dans les mappers. **Jamais de baseline ni de `@phpstan-ignore`.**
@@ -77,6 +78,9 @@ Le plan démarre **après** ces étapes. La tâche 1 vérifie qu'elles sont fait
 | `Domain/IdGeneratorInterface.php` | port de génération d'identifiants |
 | `Domain/Event/DomainEventInterface.php` | marqueur d'événement de domaine |
 | `Domain/Event/RecordsEventsTrait.php` | enregistrement/libération sur un agrégat |
+| `Domain/Event/MessageWasSent.php` | événement partagé (émis par `Message`, écouté par `Realtime`) |
+| `Domain/Event/MembershipChanged.php` | événement partagé (émis par `Conversation`, écouté par `Realtime`) |
+| `Infrastructure/Security/SecurityUser.php` | adaptateur `UserInterface` Symfony, utilisé par tous les contrôleurs |
 | `Domain/Exception/InvalidInputExceptionInterface.php` | marqueur → 422 |
 | `Domain/Exception/NotFoundExceptionInterface.php` | marqueur → 404 |
 | `Application/Event/DomainEventCollectorInterface.php` | collecte inter-agrégats dans une transaction |
@@ -98,8 +102,7 @@ Le plan démarre **après** ces étapes. La tâche 1 vérifie qu'elles sont fait
 | `Domain/UserNotFoundException.php` | → 404 |
 | `Infrastructure/Persistence/DbalUserRepository.php` | SQL |
 | `Infrastructure/Persistence/UserMapper.php` | ligne ↔ agrégat |
-| `Infrastructure/Security/SecurityUser.php` | adaptateur `UserInterface` Symfony |
-| `Infrastructure/Security/SecurityUserProvider.php` | chargement par identifiant |
+| `Infrastructure/Security/SecurityUserProvider.php` | chargement par identifiant — reste ici, `Identity` possède la table `users` |
 | `Infrastructure/Http/MeController.php` | `GET /api/me` |
 | `Infrastructure/Http/ListUsersController.php` | `GET /api/users` |
 | `Application/Query/…` | annuaire |
@@ -111,7 +114,6 @@ Le plan démarre **après** ces étapes. La tâche 1 vérifie qu'elles sont fait
 | `Domain/Conversation.php` | agrégat : membres, type, pointeur |
 | `Domain/ConversationId.php` `Domain/ConversationType.php` `Domain/MemberRole.php` `Domain/DirectKey.php` `Domain/Member.php` | VO |
 | `Domain/ConversationRepositoryInterface.php` | port |
-| `Domain/Event/MembershipChanged.php` | événement de domaine |
 | `Domain/…Exception.php` | erreurs métier |
 | `Application/Command/CreateDirectConversation*.php` `CreateGroupConversation*.php` `AddMembers*.php` `RemoveMember*.php` | use cases d'écriture |
 | `Application/Query/ListMyConversations*.php` `GetConversation*.php` | use cases de lecture |
@@ -124,9 +126,8 @@ Le plan démarre **après** ces étapes. La tâche 1 vérifie qu'elles sont fait
 
 | Fichier | Responsabilité |
 |---|---|
-| `Domain/Message.php` `MessageId.php` `MessageContent.php` `ClientMessageId.php` | agrégat et VO |
+| `Domain/Message.php` `MessageContent.php` `ClientMessageId.php` | agrégat et VO locaux |
 | `Domain/MessageRepositoryInterface.php` | port |
-| `Domain/Event/MessageWasSent.php` | événement de domaine |
 | `Application/Command/SendMessage*.php` | envoi idempotent |
 | `Application/Query/GetMessagePage*.php` `MessageView.php` | historique keyset |
 | `Infrastructure/Persistence/…` | `ON CONFLICT`, mapper, requête keyset |
@@ -1940,7 +1941,8 @@ git commit -m "feat(shared): schema initial et commande de fixtures"
 **Files:**
 - Create: `backend/src/Identity/Domain/User.php`, `UserRepositoryInterface.php`, `UserNotFoundException.php`
 - Create: `backend/src/Identity/Infrastructure/Persistence/DbalUserRepository.php`, `UserMapper.php`
-- Create: `backend/src/Identity/Infrastructure/Security/SecurityUser.php`, `SecurityUserProvider.php`
+- Create: `backend/src/Shared/Infrastructure/Security/SecurityUser.php` (partagé : tous les contextes en dépendent)
+- Create: `backend/src/Identity/Infrastructure/Security/SecurityUserProvider.php`, `LoginSuccessHandler.php`, `LoginFailureHandler.php`
 - Create: `backend/src/Identity/Infrastructure/Http/MeController.php`, `ListUsersController.php`
 - Create: `backend/tests/Functional/Identity/AuthenticationTest.php`
 - Modify: `backend/config/packages/security.yaml`
@@ -2224,10 +2226,10 @@ final readonly class DbalUserRepository implements UserRepositoryInterface
 
 ```php
 <?php
-// backend/src/Identity/Infrastructure/Security/SecurityUser.php
+// backend/src/Shared/Infrastructure/Security/SecurityUser.php
 declare(strict_types=1);
 
-namespace App\Identity\Infrastructure\Security;
+namespace App\Shared\Infrastructure\Security;
 
 use App\Shared\Domain\Identifier\UserId;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
@@ -2235,6 +2237,12 @@ use Symfony\Component\Security\Core\User\UserInterface;
 
 /**
  * Adaptateur entre le jeton de securite Symfony et le domaine.
+ *
+ * Dans Shared parce que TOUS les contextes en ont besoin : chaque controleur
+ * doit connaitre l'utilisateur courant (regle inter-contextes). Identity garde
+ * en revanche le SecurityUserProvider, qui interroge la table users dont il est
+ * proprietaire.
+ *
  * Ajouter OAuth plus tard consistera a peupler cet objet depuis un autre
  * authenticator : ni le domaine ni les use cases ne changeront.
  */
@@ -2328,7 +2336,7 @@ final readonly class SecurityUserProvider implements UserProviderInterface
 # backend/config/packages/security.yaml
 security:
     password_hashers:
-        App\Identity\Infrastructure\Security\SecurityUser: 'auto'
+        App\Shared\Infrastructure\Security\SecurityUser: 'auto'
         common: 'auto'
 
     providers:
@@ -2444,7 +2452,7 @@ declare(strict_types=1);
 namespace App\Identity\Infrastructure\Http;
 
 use App\Identity\Domain\UserRepositoryInterface;
-use App\Identity\Infrastructure\Security\SecurityUser;
+use App\Shared\Infrastructure\Security\SecurityUser;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\CurrentUser;
@@ -2528,7 +2536,7 @@ git commit -m "feat(identity): authentification locale, /api/me et annuaire"
 - Create: `backend/src/Realtime/Infrastructure/Http/RealtimeTokenController.php`
 - Create: `backend/tests/Unit/Realtime/Domain/TopicTest.php`, `backend/tests/Support/InMemoryEventPublisher.php`
 - Create: `backend/tests/Functional/Realtime/RealtimeTokenTest.php`
-- Modify: `backend/src/Identity/Infrastructure/Security/LoginSuccessHandler.php` (poser le cookie à la connexion)
+- (aucune modification d'`Identity` : voir la note ci-dessous)
 
 **Interfaces:**
 - Consumes: `AbstractUlidIdentifier`, `UserId`, `ConversationId` (`Shared/Domain/Identifier`).
@@ -2536,7 +2544,17 @@ git commit -m "feat(identity): authentification locale, /api/me et annuaire"
   - `Topic::conversation(ConversationId): self`, `Topic::userSystem(UserId): self`, `->toString(): string`. **Seul** constructeur de chaînes de topic du projet.
   - `EventPublisherInterface::publish(Topic $topic, string $eventType, array $payload, string $eventId): void`.
   - `InMemoryEventPublisher::published(): list<array{topic: string, type: string, payload: array<string, mixed>, id: string}>` — espion utilisé par toutes les tâches suivantes.
-  - `GET /api/realtime/token` → **200**, `Set-Cookie: mercureAuthorization`, corps `{"hub_url": "...", "topics": ["..."]}`, et le même cookie posé à la connexion.
+  - `GET /api/realtime/token` → **200**, `Set-Cookie: mercureAuthorization`, corps `{"hub_url": "...", "topics": ["..."]}`.
+
+> **Le cookie n'est PAS posé à la connexion.** La version initiale du plan faisait appeler
+> `MercureCookieFactory` par le `LoginSuccessHandler` d'`Identity` — une dépendance
+> `Identity → Realtime` que la règle inter-contextes interdit.
+>
+> La bonne réponse n'est pas de faire remonter la fabrique dans `Shared`, c'est de supprimer le
+> besoin : le front appelle `/api/realtime/token` juste après la connexion, ce que
+> `RealtimeClient.start()` fait **déjà** puisqu'il lui faut la liste des topics. `Identity` ignore
+> donc totalement l'existence de Mercure, il y a un chemin de moins à tester, et la contrainte
+> d'architecture a produit une simplification plutôt qu'un contournement.
 
 > **Pourquoi le corps contient la liste des topics.** Le cookie *autorise*, mais Mercure exige que
 > l'abonné *sélectionne* ses topics dans l'URL (`?topic=…`). Le front doit donc les connaître. Les
@@ -2885,17 +2903,16 @@ final class RealtimeTokenTest extends AuthenticationTest
         self::assertResponseStatusCodeSame(401);
     }
 
-    public function testLoginSetsTheMercureCookie(): void
+    public function testLoginAloneDoesNotSetTheMercureCookie(): void
     {
         $this->login('alice');
 
-        self::assertNotNull(
-            $this->client->getCookieJar()->get('mercureAuthorization'),
-            'Le cookie Mercure doit etre pose des la connexion.',
-        );
+        // Identity ne connait pas Mercure : c'est le front qui appelle
+        // /api/realtime/token juste apres, pour recuperer aussi les topics.
+        self::assertNull($this->client->getCookieJar()->get('mercureAuthorization'));
     }
 
-    public function testTokenEndpointRefreshesTheCookieAndReturnsTheTopics(): void
+    public function testTokenEndpointSetsTheCookieAndReturnsTheTopics(): void
     {
         $this->login('alice');
 
@@ -2920,7 +2937,7 @@ final class RealtimeTokenTest extends AuthenticationTest
 }
 ```
 
-- [ ] **Step 8: Écrire le contrôleur et brancher le cookie à la connexion**
+- [ ] **Step 8: Écrire le contrôleur**
 
 ```php
 <?php
@@ -2929,7 +2946,7 @@ declare(strict_types=1);
 
 namespace App\Realtime\Infrastructure\Http;
 
-use App\Identity\Infrastructure\Security\SecurityUser;
+use App\Shared\Infrastructure\Security\SecurityUser;
 use App\Realtime\Infrastructure\Mercure\MercureCookieFactory;
 use App\Realtime\Infrastructure\Mercure\SubscribeTopicsProvider;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -2974,27 +2991,7 @@ services:
             $mercurePublicUrl: '%env(MERCURE_PUBLIC_URL)%'
 ```
 
-Modifier `LoginSuccessHandler` (tâche 6) pour poser le même cookie :
-
-```php
-// backend/src/Identity/Infrastructure/Security/LoginSuccessHandler.php — corps de onAuthenticationSuccess
-public function onAuthenticationSuccess(Request $request, TokenInterface $token): Response
-{
-    /** @var SecurityUser $user */
-    $user = $token->getUser();
-
-    $this->logger->notice('Connexion de l\'utilisateur {user_id}', [
-        'user_id' => $user->userId()->toString(),
-    ]);
-
-    $response = new JsonResponse(['status' => 'ok']);
-    $response->headers->setCookie($this->cookieFactory->forUser($request, $user->userId()));
-
-    return $response;
-}
-```
-
-Ajouter `private MercureCookieFactory $cookieFactory` au constructeur.
+`LoginSuccessHandler` (tâche 6) reste **inchangé** : `Identity` n'a aucune raison de connaître Mercure.
 
 - [ ] **Step 9: Vérifier**
 
@@ -3008,7 +3005,7 @@ docker compose exec backend vendor/bin/phpstan analyse
 
 ```bash
 git checkout -b feat/realtime-topics-et-token
-git add backend/src/Realtime backend/src/Identity backend/tests backend/config
+git add backend/src/Realtime backend/tests backend/config
 git commit -m "feat(realtime): VO Topic, publication Mercure et cookie JWT"
 ```
 
@@ -3832,7 +3829,7 @@ declare(strict_types=1);
 namespace App\Conversation\Infrastructure\Http;
 
 use App\Conversation\Application\Command\CreateDirectConversation;
-use App\Identity\Infrastructure\Security\SecurityUser;
+use App\Shared\Infrastructure\Security\SecurityUser;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
 use App\Shared\Infrastructure\Bus\CommandDispatcher;
@@ -3905,7 +3902,7 @@ namespace App\Conversation\Infrastructure\Http;
 
 use App\Conversation\Application\Query\ConversationView;
 use App\Conversation\Application\Query\ListMyConversations;
-use App\Identity\Infrastructure\Security\SecurityUser;
+use App\Shared\Infrastructure\Security\SecurityUser;
 use App\Shared\Infrastructure\Bus\QueryDispatcher;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -4152,17 +4149,20 @@ Attendu : ÉCHEC, `Conversation::group()` n'existe pas.
 
 ```php
 <?php
-// backend/src/Conversation/Domain/Event/MembershipChanged.php
+// backend/src/Shared/Domain/Event/MembershipChanged.php
+// Ecoute par Realtime : evenement partage, donc dans Shared (regle inter-contextes).
 declare(strict_types=1);
 
-namespace App\Conversation\Domain\Event;
+namespace App\Shared\Domain\Event;
 
-use App\Shared\Domain\Event\DomainEventInterface;
+use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\UserId;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
 
 final readonly class MembershipChanged implements DomainEventInterface
 {
+    // Charge utile en types Shared et scalaires uniquement : c'est un contrat.
     /** @param 'joined'|'left' $change */
     public function __construct(
         public ConversationId $conversationId,
@@ -4333,7 +4333,7 @@ declare(strict_types=1);
 namespace App\Conversation\Infrastructure\Security;
 
 use App\Conversation\Application\MembershipCheckerInterface;
-use App\Identity\Infrastructure\Security\SecurityUser;
+use App\Shared\Infrastructure\Security\SecurityUser;
 use App\Shared\Domain\Identifier\ConversationId;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
@@ -4531,9 +4531,9 @@ declare(strict_types=1);
 
 namespace App\Realtime\Application\EventListener;
 
-use App\Conversation\Domain\Event\MembershipChanged;
 use App\Realtime\Domain\EventPublisherInterface;
 use App\Realtime\Domain\Topic;
+use App\Shared\Domain\Event\MembershipChanged;
 use App\Shared\Domain\IdGeneratorInterface;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
@@ -4566,7 +4566,7 @@ final readonly class PublishMembershipChanged
 }
 ```
 
-> `Realtime/Application` référence `Conversation\Domain\Event\MembershipChanged`. C'est la **seule** dépendance inter-contextes du projet et elle est délibérée : un abonné doit connaître l'événement auquel il s'abonne. Ajouter la règle correspondante dans `deptrac.yaml` : `RealtimeApplication: [..., ConversationDomain]`, et **ne pas l'élargir**.
+> `MembershipChanged` vit dans `Shared/Domain/Event/` précisément parce que `Realtime` l'écoute : un abonné doit connaître l'événement auquel il s'abonne, donc l'événement est un **contrat partagé**. **Aucune règle deptrac à ajouter** — `RealtimeApplication` dépend déjà de `SharedDomain`.
 
 - [ ] **Step 9: Écrire les contrôleurs restants et remplacer `CreateConversationController`**
 
@@ -4867,7 +4867,7 @@ declare(strict_types=1);
 
 namespace App\Message\Domain;
 
-use App\Message\Domain\Event\MessageWasSent;
+use App\Shared\Domain\Event\MessageWasSent;
 use App\Shared\Domain\Event\RecordsEventsTrait;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\MessageId;
@@ -4896,7 +4896,9 @@ final class Message
         \DateTimeImmutable $now,
     ): self {
         $message = new self($id, $conversationId, $senderId, $content, $clientMessageId, $now);
-        $message->recordEvent(new MessageWasSent($id, $conversationId, $senderId, $content, $now));
+        $message->recordEvent(
+            new MessageWasSent($id, $conversationId, $senderId, $content->toString(), $now),
+        );
 
         return $message;
     }
@@ -4948,24 +4950,30 @@ final class Message
 
 ```php
 <?php
-// backend/src/Message/Domain/Event/MessageWasSent.php
+// backend/src/Shared/Domain/Event/MessageWasSent.php
+// Ecoute par Realtime : evenement partage, donc dans Shared (regle inter-contextes).
 declare(strict_types=1);
 
-namespace App\Message\Domain\Event;
+namespace App\Shared\Domain\Event;
 
-use App\Message\Domain\MessageContent;
-use App\Shared\Domain\Event\DomainEventInterface;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Domain\Identifier\UserId;
 
 final readonly class MessageWasSent implements DomainEventInterface
 {
+    /**
+     * Le contenu voyage en string, PAS en MessageContent : un evenement partage
+     * ne transporte que des types de Shared et des scalaires. L'inverse ferait
+     * dependre Shared du contexte Message — une inversion pire que le probleme.
+     * L'invariant de validite a de toute facon deja ete verifie a la construction
+     * du MessageContent, en amont.
+     */
     public function __construct(
         public MessageId $messageId,
         public ConversationId $conversationId,
         public UserId $senderId,
-        public MessageContent $content,
+        public string $content,
         public \DateTimeImmutable $createdAt,
     ) {
     }
@@ -5231,9 +5239,9 @@ declare(strict_types=1);
 
 namespace App\Realtime\Application\EventListener;
 
-use App\Message\Domain\Event\MessageWasSent;
 use App\Realtime\Domain\EventPublisherInterface;
 use App\Realtime\Domain\Topic;
+use App\Shared\Domain\Event\MessageWasSent;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 /** Un seul publish par message : le hub assure le fan-out O(N), le metier reste en O(1). */
@@ -5253,7 +5261,7 @@ final readonly class PublishMessageWasSent
                 'id' => $event->messageId->toString(),
                 'conversation_id' => $event->conversationId->toString(),
                 'sender_id' => $event->senderId->toString(),
-                'content' => $event->content->toString(),
+                'content' => $event->content,
                 'created_at' => $event->createdAt->format(\DateTimeInterface::ATOM),
             ],
             // L'id de l'evenement SSE est l'ULID du message : Last-Event-ID
@@ -5264,7 +5272,7 @@ final readonly class PublishMessageWasSent
 }
 ```
 
-Ajouter `MessageDomain` aux dépendances autorisées de `RealtimeApplication` dans `deptrac.yaml`.
+`MessageWasSent` étant dans `Shared/Domain/Event/`, **aucune règle deptrac n'est à modifier**.
 
 - [ ] **Step 7: Écrire le test fonctionnel de l'idempotence**
 
