@@ -1,0 +1,102 @@
+# Intégration continue.
+#
+# La CI rejoue les portes de qualité du projet — les mêmes cibles `make` qu'en
+# local, dans les mêmes conteneurs. Rien n'est installé sur le runner : ni PHP,
+# ni Node, ni Composer. Une CI qui utiliserait `setup-php` / `setup-node`
+# testerait un environnement que personne n'a sur sa machine.
+#
+# Les trois jobs sont indépendants et tournent en parallèle : un échec de style
+# n'empêche pas de savoir si les tests passent.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  # `main` est aussi construite : c'est l'état de référence affiché par le badge,
+  # et le seul moyen de détecter une régression introduite par un merge.
+  push:
+    branches: [main]
+
+# Un nouveau push sur une PR annule le run précédent de la même branche : inutile
+# de payer deux fois pour un code déjà remplacé. Sur `main`, on ne coupe rien.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # PHPStan, PHP-CS-Fixer et deptrac : trois outils qui ne lisent que des
+  # fichiers. Les cibles correspondantes passent `--no-deps`, donc aucune base
+  # n'est levée ici.
+  backend-quality:
+    name: Analyse statique (PHPStan, CS, deptrac)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `make .env` renseigne les UID/GID du runner et tire un secret Mercure au
+      # hasard. Sans ce fichier, `docker compose` n'a pas ses variables.
+      - name: Préparer le .env
+        run: make .env
+
+      - name: Installer les dépendances PHP
+        run: make install
+
+      # Chaque porte est une étape distincte : l'onglet Actions dit laquelle a
+      # cassé sans qu'on ait à dérouler un log unique.
+      - name: PHPStan
+        run: make static-code-analysis
+
+      - name: PHP-CS-Fixer
+        run: make check-cs
+
+      - name: deptrac
+        run: make deptrac
+
+  backend-tests:
+    name: Tests PHP (unitaires + fonctionnels)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Préparer le .env
+        run: make .env
+
+      - name: Installer les dépendances PHP
+        run: make install
+
+      # `make test` enchaîne les deux suites. La suite fonctionnelle lève sa
+      # propre stack (`compose.test.yaml`), migre la base et la détruit ensuite,
+      # en propageant le code de sortie de PHPUnit.
+      - name: Suite de tests
+        run: make test
+
+  frontend:
+    name: Front (tsc + Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Préparer le .env
+        run: make .env
+
+      # On n'appelle pas `make front-test` : cette cible dépend de `up`, qui
+      # lèverait toute la stack (backend, postgres, mercure, caddy) alors que
+      # tsc et Vitest n'ont besoin que du conteneur Node. On reproduit donc
+      # exactement ce que font les cibles `front-*`, sur ce seul service.
+      # Le `exec` (et non `run`) est délibéré : le volume anonyme qui porte
+      # `node_modules` appartient au conteneur qui tourne — un `run` en
+      # fabriquerait un neuf et vide.
+      - name: Démarrer le conteneur frontend
+        run: docker compose up -d --wait frontend
+
+      - name: Typage TypeScript
+        run: docker compose exec -T frontend npm run typecheck
+
+      - name: Vitest
+        run: docker compose exec -T frontend npm test
+
+      # Les logs du conteneur ne servent qu'en cas d'échec — un `npm install`
+      # cassé pendant la construction de l'image, par exemple.
+      - name: Logs du conteneur en cas d'échec
+        if: failure()
+        run: docker compose logs frontend
