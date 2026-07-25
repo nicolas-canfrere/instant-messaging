@@ -1,9 +1,33 @@
+import { ProblemError } from './problem';
+
 type Options = {
   attempts: number;
   baseDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  /** Par defaut `isRetryable` : voir ci-dessous. */
+  shouldRetry?: (cause: unknown) => boolean;
 };
+
+/**
+ * Un reessai n'a de sens que si la meme requete peut encore reussir.
+ *
+ *  - Une erreur qui n'est pas un `ProblemError` vient du `fetch` lui-meme
+ *    (reseau coupe, DNS, serveur injoignable) : c'est le cas type a rejouer.
+ *  - 5xx : le serveur a echoue, pas la requete. Rejouable.
+ *  - 429 : on nous demande explicitement de ralentir, donc de revenir plus tard.
+ *  - Tous les autres 4xx (422 contenu invalide, 404 non-membre, 401 session
+ *    expiree) sont des verdicts sur la requete : la rejouer donnera exactement
+ *    la meme reponse, trois fois, en faisant seulement attendre l'utilisateur
+ *    plusieurs secondes avant que la bulle ne rougisse.
+ */
+export function isRetryable(cause: unknown): boolean {
+  if (!(cause instanceof ProblemError)) {
+    return true;
+  }
+
+  return cause.status >= 500 || cause.status === 429;
+}
 
 /**
  * Backoff exponentiel avec jitter.
@@ -19,6 +43,7 @@ export async function retryWithBackoff<T>(task: () => Promise<T>, options: Optio
   const base = options.baseDelayMs ?? 300;
   const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const random = options.random ?? Math.random;
+  const shouldRetry = options.shouldRetry ?? isRetryable;
 
   let lastError: unknown;
 
@@ -27,6 +52,9 @@ export async function retryWithBackoff<T>(task: () => Promise<T>, options: Optio
       return await task();
     } catch (cause) {
       lastError = cause;
+
+      // Verdict definitif : on remonte tout de suite, sans meme dormir.
+      if (!shouldRetry(cause)) break;
 
       if (attempt === options.attempts - 1) break;
 

@@ -32,7 +32,12 @@ export function MessageList({ thread, users, meId, onLoadOlder }: Props) {
   // EN TETE de la liste. Doit etre appele avant l'effet de suivi ci-dessous :
   // les effets de layout s'executent dans l'ordre de declaration, et le suivi
   // du bas doit pouvoir ecraser la correction quand les deux s'appliquent.
-  useScrollAnchor(container, thread.items.length);
+  //
+  // On lui passe l'identifiant du premier message : c'est lui qui distingue un
+  // prepend (page ancienne) d'un simple ajout en bas (message recu en SSE), que
+  // le hook ne doit surtout PAS corriger. La longueur ne sert qu'a le faire
+  // tourner a chaque changement de liste (voir le commentaire du hook).
+  useScrollAnchor(container, thread.items[0]?.clientMessageId ?? null, thread.items.length);
 
   useLayoutEffect(() => {
     const element = container.current;

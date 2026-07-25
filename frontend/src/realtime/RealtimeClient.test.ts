@@ -42,6 +42,7 @@ function build(overrides: Partial<Options> = {}) {
   FakeEventSource.instances = [];
 
   const onEvent = vi.fn();
+  const onError = vi.fn();
   const fetchToken = vi.fn().mockResolvedValue({
     hub_url: 'http://localhost:8080/.well-known/mercure',
     topics: ['/conversations/A', '/users/U/system'],
@@ -51,10 +52,11 @@ function build(overrides: Partial<Options> = {}) {
     fetchToken,
     createEventSource: (url: string) => new FakeEventSource(url),
     onEvent,
+    onError,
     ...overrides,
   });
 
-  return { client, onEvent, fetchToken };
+  return { client, onEvent, onError, fetchToken };
 }
 
 describe('RealtimeClient', () => {
@@ -131,6 +133,54 @@ describe('RealtimeClient', () => {
     expect(FakeEventSource.instances).toHaveLength(2);
     expect(at(FakeEventSource.instances, 0).closed).toBe(true);
     expect(FakeEventSource.instances.filter((source) => !source.closed)).toHaveLength(1);
+
+    client.stop();
+  });
+
+  it('signale puis reessaie quand la premiere recuperation du jeton echoue', async () => {
+    // Sans reessai, un seul 503 sur /api/realtime/token laisserait l'utilisateur
+    // avec une interface parfaitement fonctionnelle mais SANS aucun message
+    // live, et ce jusqu'au rechargement de la page : la panne serait invisible.
+    vi.useFakeTimers();
+
+    try {
+      const { client, onError, fetchToken } = build({ retryDelayMs: 5000 });
+      fetchToken.mockRejectedValueOnce(new Error('503 hub indisponible'));
+
+      // `start()` ne doit PAS rejeter : l'appelant fait `void client.start()`,
+      // un rejet y serait avale sans aucune trace.
+      await client.start();
+
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(FakeEventSource.instances).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(fetchToken).toHaveBeenCalledTimes(2);
+      expect(FakeEventSource.instances).toHaveLength(1);
+      expect(at(FakeEventSource.instances, 0).closed).toBe(false);
+
+      client.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('conserve le flux courant quand le renouvellement du jeton echoue', async () => {
+    const { client, onError, fetchToken } = build();
+
+    await client.start();
+
+    fetchToken.mockRejectedValueOnce(new Error('503 hub indisponible'));
+
+    // Ne doit pas rejeter non plus : les appels periodiques font `void resubscribe()`.
+    await client.resubscribe();
+
+    // Le flux d'origine reste ouvert : mieux vaut un abonnement incomplet
+    // (il manque le topic tout juste cree) qu'aucun temps reel du tout.
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(at(FakeEventSource.instances, 0).closed).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(1);
 
     client.stop();
   });
