@@ -1,0 +1,49 @@
+# Dimension contexte : un contexte ne depend que du contrat publie d'un autre,
+# jamais de ses internes (cf. ADR 0001).
+deptrac:
+    paths:
+        - ./src
+    layers:
+        - name: Shared
+          collectors: [{ type: directory, value: 'src/Shared/.*' }]
+
+        # La surface publiee de Conversation est une couche distincte du contexte
+        # lui-meme : c'est la seule chose que les autres ont le droit de voir.
+        - name: ConversationContract
+          collectors: [{ type: directory, value: 'src/Conversation/Application/Contract/.*' }]
+
+        - name: Conversation
+          collectors:
+              - type: bool
+                must:
+                    - { type: directory, value: 'src/Conversation/.*' }
+                must_not:
+                    - { type: directory, value: 'src/Conversation/Application/Contract/.*' }
+
+        - name: Identity
+          collectors: [{ type: directory, value: 'src/Identity/.*' }]
+        - name: Message
+          collectors: [{ type: directory, value: 'src/Message/.*' }]
+        - name: Realtime
+          collectors: [{ type: directory, value: 'src/Realtime/.*' }]
+
+        # Presente uniquement pour que `--fail-on-uncovered` ait un sens ici :
+        # sans elle, chaque `use Symfony\...` remonterait comme non couvert.
+        # Quelle couche a le droit de toucher au vendor est une question de
+        # dimension technique, tranchee par `deptrac.yaml`.
+        - name: Vendor
+          collectors:
+              - type: classNameRegex
+                value: '#^(Symfony|Doctrine|Psr|Monolog|Lcobucci)\\.*#'
+
+    ruleset:
+        Shared: [Vendor]
+        ConversationContract: ~          # un contrat ne depend de rien
+
+        Identity: [Shared, Vendor]
+        Conversation: [Shared, Vendor]
+        Message: [Shared, Vendor]
+
+        # Allowlist explicite : ajouter un couplage inter-contextes demande de
+        # modifier cette ligne. La friction est voulue.
+        Realtime: [Shared, ConversationContract, Vendor]

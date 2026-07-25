@@ -71,7 +71,7 @@ check-cs: ## Check coding standards with PHP CS Fixer (no auto-fix)
 
 deptrac: ## Check architectural layer dependencies + bounded context boundaries
 	$(DOCKER_COMPOSE_RUN) --no-deps backend vendor/bin/deptrac analyse --no-progress --fail-on-uncovered
-	# $(DOCKER_COMPOSE_RUN) --no-deps backend vendor/bin/deptrac --config-file=deptrac-contexts.yaml analyse --no-progress --fail-on-uncovered
+	$(DOCKER_COMPOSE_RUN) --no-deps backend vendor/bin/deptrac --config-file=deptrac-contexts.yaml analyse --no-progress --fail-on-uncovered
 
 ##@ Tests
 # Stack de test isolée : nom de projet distinct, donc conteneurs, réseau et
