@@ -324,8 +324,25 @@ export function useAppState(me: Me): AppState {
   const deleteMessage = useCallback(
     async (conversationId: string, messageId: string) => {
       await api.deleteMessage(conversationId, messageId);
-      // Pas de dispatch ici : l'echo SSE pose l'etat, et il est idempotent.
-      // Si le hub est injoignable, le rechargement de l'historique corrigera.
+
+      // Comme pour l'edition : on applique localement des le 2xx, sans attendre
+      // l'echo SSE. Si le hub est injoignable, l'echo n'arrivera JAMAIS, et rien
+      // dans le front ne recharge un fil deja charge — le message supprime
+      // resterait affiche sans la moindre erreur visible. L'operation est
+      // idempotente, le doublon avec l'echo est donc sans consequence.
+      //
+      // `DELETE` repond 204 sans corps : il n'y a pas de `deleted_at` serveur a
+      // appliquer, on pose donc un instant CLIENT provisoire, que l'echo SSE
+      // ecrasera avec la valeur serveur. C'est le motif de l'envoi optimiste de
+      // la tranche 1, et il est legitime ici parce que `deletedAt` ne sert qu'a
+      // lever le drapeau du tombstone, jamais a ordonner : l'ordre du fil reste
+      // porte par l'ULID serveur.
+      dispatch({
+        type: 'message/deleted',
+        conversationId,
+        id: messageId,
+        deletedAt: new Date().toISOString(),
+      });
     },
     [],
   );
@@ -338,7 +355,19 @@ export function useAppState(me: Me): AppState {
       // refuse en 409. Un `content` nul ici voudrait dire que la reponse ne dit
       // pas ce qu'on croit — on ne l'applique alors pas, plutot que d'inventer
       // une chaine vide qui effacerait le message a l'ecran.
-      if (updated.content === null) return;
+      //
+      // On laisse une trace : c'est le seul chemin du fichier ou une reponse
+      // serveur est ignoree. L'anomalie n'est pas actionnable par l'utilisateur,
+      // elle ne remonte donc pas a l'ecran — mais un abandon totalement muet
+      // serait indebuggable.
+      if (updated.content === null) {
+        reportRealtimeIssue(
+          `reponse d edition sans contenu ignoree pour le message ${messageId}`,
+          null,
+        );
+
+        return;
+      }
 
       // La reponse porte le meme etat final que l'echo SSE : l'appliquer ici
       // aussi rend l'edition visible meme si le hub est injoignable, et
