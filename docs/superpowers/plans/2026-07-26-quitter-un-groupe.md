@@ -280,6 +280,10 @@ use App\Tests\Support\InMemoryEventPublisher;
 
 final class LeaveGroupTest extends DatabaseTestCase
 {
+    /**
+     * Ce test verrouille aussi la route : si `/members/{userId}` captait
+     * `/members/me`, Bob recevrait un 403 faute de droits d'admin.
+     */
     public function testAPlainMemberLeavesAndTheGroupForgetsHim(): void
     {
         $this->login('alice');
@@ -394,21 +398,6 @@ final class LeaveGroupTest extends DatabaseTestCase
 
         $this->leave($groupId);
         self::assertResponseStatusCodeSame(404);
-    }
-
-    /**
-     * La route dediee ne doit jamais etre captee par `/members/{userId}`, qui
-     * exigerait des droits d'admin et repondrait 403 a un simple membre.
-     */
-    public function testTheDedicatedRouteIsNotShadowedByTheRemovalRoute(): void
-    {
-        $this->login('alice');
-        $groupId = $this->createGroup('Equipe projet', [$this->userId('bob')]);
-
-        $this->login('bob');
-        $this->leave($groupId);
-
-        self::assertResponseStatusCodeSame(204);
     }
 
     private function leave(string $conversationId): void
@@ -621,7 +610,7 @@ use App\Shared\Domain\Identifier\AbstractUlidIdentifier;
 make functional-test ARGS="--filter=LeaveGroupTest"
 ```
 
-Attendu : SUCCÈS, les sept tests.
+Attendu : SUCCÈS, les six tests.
 
 - [ ] **Step 8 : lancer toute la suite et les portes de qualité**
 
