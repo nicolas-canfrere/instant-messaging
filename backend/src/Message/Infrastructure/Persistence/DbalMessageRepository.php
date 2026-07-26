@@ -9,6 +9,8 @@ use App\Message\Domain\Message;
 use App\Message\Domain\MessageNotFoundException;
 use App\Message\Domain\MessageRepositoryInterface;
 use App\Shared\Application\Event\DomainEventCollectorInterface;
+use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Domain\Identifier\UserId;
 use Doctrine\DBAL\Connection;
 
@@ -60,6 +62,56 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
         $this->collector->collect(...$message->releaseEvents());
 
         return null;
+    }
+
+    public function ofId(ConversationId $conversationId, MessageId $messageId): Message
+    {
+        // Les deux identifiants sont dans le WHERE : un message d'un autre fil
+        // est introuvable, ce qui rend le 404 indistinguable d'un identifiant
+        // inconnu sans que l'appelant ait a y penser.
+        /** @var array{id: string, conversation_id: string, sender_id: string, content: string|null, client_message_id: string, created_at: string, edited_at: string|null, deleted_at: string|null}|false $row */
+        $row = $this->connection->fetchAssociative(
+            <<<'SQL'
+                SELECT id, conversation_id, sender_id, content, client_message_id, created_at, edited_at, deleted_at
+                FROM messages
+                WHERE id = :id
+                  AND conversation_id = :conversation_id
+                SQL,
+            [
+                'id' => $messageId->toString(),
+                'conversation_id' => $conversationId->toString(),
+            ],
+        );
+
+        if (false === $row) {
+            throw MessageNotFoundException::inConversation($conversationId, $messageId);
+        }
+
+        return $this->mapper->fromRow($row);
+    }
+
+    public function save(Message $message): void
+    {
+        // Seules les trois colonnes mutables. L'id, l'expediteur, la cle client
+        // et l'instant d'envoi ne sont pas remplacables — c'est aussi pourquoi
+        // la route est un PATCH et non un PUT.
+        $this->connection->executeStatement(
+            <<<'SQL'
+                UPDATE messages
+                SET content = :content,
+                    edited_at = :edited_at,
+                    deleted_at = :deleted_at
+                WHERE id = :id
+                SQL,
+            [
+                'content' => $message->content()?->toString(),
+                'edited_at' => $message->editedAt()?->format(\DateTimeInterface::ATOM),
+                'deleted_at' => $message->deletedAt()?->format(\DateTimeInterface::ATOM),
+                'id' => $message->id()->toString(),
+            ],
+        );
+
+        $this->collector->collect(...$message->releaseEvents());
     }
 
     private function ofClientKey(UserId $senderId, ClientMessageId $clientMessageId): Message

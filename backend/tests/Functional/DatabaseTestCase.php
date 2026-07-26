@@ -133,22 +133,6 @@ abstract class DatabaseTestCase extends WebTestCase
         return $created['id'];
     }
 
-    /** @return list<array{id: string, type: string, last_message_preview: string|null, last_message_at: string|null}> */
-    private function conversations(): array
-    {
-        $this->client->request('GET', '/api/conversations');
-
-        /** @var list<array{id: string, type: string, last_message_preview: string|null, last_message_at: string|null}> $body */
-        $body = json_decode(
-            (string) $this->client->getResponse()->getContent(),
-            true,
-            512,
-            \JSON_THROW_ON_ERROR,
-        );
-
-        return $body;
-    }
-
     /** Envoie un message et rend l'identifiant serveur du message cree (ou rejoue). */
     protected function send(string $conversationId, string $clientMessageId, string $content): string
     {
@@ -171,5 +155,21 @@ abstract class DatabaseTestCase extends WebTestCase
         );
 
         return $decoded['id'] ?? '';
+    }
+
+    /** @return list<array{id: string, type: string, last_message_preview: string|null, last_message_at: string|null}> */
+    private function conversations(): array
+    {
+        $this->client->request('GET', '/api/conversations');
+
+        /** @var list<array{id: string, type: string, last_message_preview: string|null, last_message_at: string|null}> $body */
+        $body = json_decode(
+            (string) $this->client->getResponse()->getContent(),
+            true,
+            512,
+            \JSON_THROW_ON_ERROR,
+        );
+
+        return $body;
     }
 }

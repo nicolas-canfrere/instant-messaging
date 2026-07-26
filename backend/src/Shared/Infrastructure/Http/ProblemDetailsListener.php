@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Shared\Infrastructure\Http;
 
+use App\Shared\Domain\Exception\ForbiddenExceptionInterface;
 use App\Shared\Domain\Exception\InvalidInputExceptionInterface;
 use App\Shared\Domain\Exception\NotFoundExceptionInterface;
 use App\Shared\Infrastructure\Log\CorrelationIdHolder;
@@ -119,6 +120,14 @@ final readonly class ProblemDetailsListener
                 '/problems/authentication-required',
                 'Authentification requise',
                 'Cette ressource necessite une session valide.',
+            ],
+            // Un probleme nomme par le domaine : le slug et le libelle viennent
+            // de l'exception, le statut et la forme d'URI restent decides ici.
+            $throwable instanceof ForbiddenExceptionInterface => [
+                Response::HTTP_FORBIDDEN,
+                sprintf('/problems/%s', $throwable->problemSlug()),
+                $throwable->problemTitle(),
+                $throwable->getMessage(),
             ],
             $throwable instanceof AccessDeniedException => [
                 Response::HTTP_FORBIDDEN,

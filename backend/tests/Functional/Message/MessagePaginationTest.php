@@ -142,6 +142,44 @@ final class MessagePaginationTest extends DatabaseTestCase
         self::assertResponseStatusCodeSame(404);
     }
 
+    /**
+     * Le tombstone garde sa place dans l'ordre : c'est ce qui protege a la fois
+     * la pagination keyset et les watermarks de la tranche 2, qui designent des
+     * identifiants.
+     */
+    public function testDeletingAMessageLeavesNoHoleInThePagination(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+
+        $ids = $this->sendMany($conversationId, 120);
+
+        $middleId = $ids[60];
+        $this->client->request('DELETE', sprintf('/api/conversations/%s/messages/%s', $conversationId, $middleId));
+        self::assertResponseStatusCodeSame(204);
+
+        $seen = [];
+        $before = null;
+
+        do {
+            $query = null === $before ? 'limit=50' : sprintf('limit=50&before=%s', $before);
+            $this->client->request('GET', sprintf('/api/conversations/%s/messages?%s', $conversationId, $query));
+
+            /** @var array{items: list<array{id: string}>, next_before: string|null} $page */
+            $page = $this->json();
+
+            foreach ($page['items'] as $item) {
+                $seen[] = $item['id'];
+            }
+
+            $before = $page['next_before'];
+        } while (null !== $before);
+
+        self::assertCount(120, $seen, 'Ni trou ni doublon : le tombstone compte toujours.');
+        self::assertCount(120, array_unique($seen));
+        self::assertContains($middleId, $seen);
+    }
+
     /** @return list<string> identifiants dans l'ordre d'envoi */
     private function sendMany(string $conversationId, int $count): array
     {
