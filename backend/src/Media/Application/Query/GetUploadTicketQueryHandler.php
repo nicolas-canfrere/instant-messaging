@@ -16,8 +16,6 @@ use Psr\Clock\ClockInterface;
  */
 final readonly class GetUploadTicketQueryHandler implements QueryHandlerInterface
 {
-    private const string TTL = '+5 minutes';
-
     public function __construct(
         private UploadTicketReaderInterface $reader,
         private MediaStorageInterface $storage,
@@ -33,12 +31,15 @@ final readonly class GetUploadTicketQueryHandler implements QueryHandlerInterfac
             throw MediaNotFoundException::withId($query->mediaId);
         }
 
-        $now = $this->clock->now();
+        // `presignUpload` rend l'URL ET l'expiration REELLE de sa signature
+        // dans le meme objet : aucune copie locale de la duree de vie qui
+        // pourrait diverger de celle effectivement signee.
+        $presigned = $this->storage->presignUpload($found['key'], $found['mimeType'], $this->clock->now());
 
         return new UploadTicket(
             $query->mediaId->toString(),
-            $this->storage->presignUpload($found['key'], $found['mimeType'], $now),
-            $now->modify(self::TTL)->format(\DateTimeInterface::ATOM),
+            $presigned->url,
+            $presigned->expiresAt->format(\DateTimeInterface::ATOM),
         );
     }
 }

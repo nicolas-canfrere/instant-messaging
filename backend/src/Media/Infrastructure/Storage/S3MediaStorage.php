@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Media\Infrastructure\Storage;
 
 use App\Media\Application\MediaStorageInterface;
+use App\Media\Application\PresignedUpload;
 use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\StorageKey;
+use App\Shared\Domain\Identifier\MediaId;
 use Aws\Exception\AwsException;
 use Aws\S3\S3Client;
 use Psr\Log\LoggerInterface;
@@ -33,16 +35,22 @@ final readonly class S3MediaStorage implements MediaStorageInterface
         private S3Client $signerClient,
         private string $bucket,
         private LoggerInterface $logger,
+        // `false` en production : `minio-create-bucket` (compose.yaml) a deja
+        // fait le travail, et un HEAD systematique sur le chemin de signature
+        // ajouterait un aller-retour bloquant a CHAQUE presign — pire, un vrai
+        // S3 a politique restrictive repond souvent 403 (pas 404) a un HEAD
+        // sur un bucket qu'on ne peut pas lister, ce qui ferait 500 la ou rien
+        // n'est casse. `true` seulement en test (services_test.yaml) : la
+        // stack de test ne lance aucun conteneur `mc` pour pre-creer le bucket.
+        private bool $createBucketIfMissing = false,
     ) {
     }
 
-    public function presignUpload(StorageKey $key, MediaMimeType $mimeType, \DateTimeImmutable $now): string
+    public function presignUpload(StorageKey $key, MediaMimeType $mimeType, \DateTimeImmutable $now): PresignedUpload
     {
-        // Le bucket doit exister AVANT que l'URL ne soit signee : c'est cette
-        // URL que le navigateur ouvrira, sans repasser par le backend. La
-        // stack de test ne lance aucun conteneur `mc` pour le creer d'avance
-        // (compose.test.yaml) : c'est ce code qui en tient lieu.
-        $this->ensureBucketExists();
+        if ($this->createBucketIfMissing) {
+            $this->ensureBucketExists();
+        }
 
         $command = $this->signerClient->getCommand('PutObject', [
             'Bucket' => $this->bucket,
@@ -50,11 +58,20 @@ final readonly class S3MediaStorage implements MediaStorageInterface
             'ContentType' => $mimeType->value,
         ]);
 
+        // L'expiration REELLE de la signature et celle annoncee au client
+        // doivent venir de la MEME valeur : `$expiresAt` sert aux deux, pour
+        // qu'aucune copie ne puisse diverger de l'autre.
+        $expiresAt = $now->modify(self::UPLOAD_TTL);
+
         $url = (string) $this->signerClient
-            ->createPresignedRequest($command, $now->modify(self::UPLOAD_TTL))
+            ->createPresignedRequest($command, $expiresAt)
             ->getUri();
 
-        return '' === $url ? throw new \RuntimeException('La signature a rendu une URL vide.') : $url;
+        if ('' === $url) {
+            throw new \RuntimeException('La signature a rendu une URL vide.');
+        }
+
+        return new PresignedUpload($url, $expiresAt);
     }
 
     public function presignDownload(StorageKey $key, \DateTimeImmutable $now): string
@@ -90,7 +107,7 @@ final readonly class S3MediaStorage implements MediaStorageInterface
         } catch (AwsException $exception) {
             @unlink($path);
 
-            if ('NoSuchKey' === $exception->getAwsErrorCode()) {
+            if ($this->isMissingObject($exception)) {
                 return null;
             }
 
@@ -104,7 +121,9 @@ final readonly class S3MediaStorage implements MediaStorageInterface
 
     public function put(StorageKey $key, string $localPath, MediaMimeType $mimeType): void
     {
-        $this->ensureBucketExists();
+        if ($this->createBucketIfMissing) {
+            $this->ensureBucketExists();
+        }
 
         $this->internalClient->putObject([
             'Bucket' => $this->bucket,
@@ -114,7 +133,7 @@ final readonly class S3MediaStorage implements MediaStorageInterface
         ]);
     }
 
-    public function delete(StorageKey $key): void
+    public function delete(StorageKey $key, MediaId $mediaId): void
     {
         try {
             $this->internalClient->deleteObject([
@@ -122,20 +141,29 @@ final readonly class S3MediaStorage implements MediaStorageInterface
                 'Key' => $key->toString(),
             ]);
         } catch (AwsException $exception) {
-            // Effacer est idempotent : un objet deja absent n'est pas un echec.
-            // On le signale sans interrompre l'appelant — jamais la cle en clair.
-            $this->logger->warning('Suppression du media {aws_error_code} sans effet', [
+            // Absence genuine : effacer est idempotent, rien a signaler. Tout
+            // AUTRE echec (identifiants, reseau, bucket manquant, 5xx) doit
+            // remonter — le taire aurait fait passer l'echec d'une purge pour
+            // un succes (Task 11), en laissant l'objet en place.
+            if ($this->isMissingObject($exception)) {
+                return;
+            }
+
+            $this->logger->error('Suppression du media {media_id} en echec : {aws_error_code}', [
+                'media_id' => $mediaId->toString(),
                 'aws_error_code' => $exception->getAwsErrorCode() ?? 'unknown',
             ]);
+
+            throw $exception;
         }
     }
 
     /**
      * Cree le bucket au premier acces s'il est absent. En production, le
-     * `minio-create-bucket` de `compose.yaml` l'a deja fait : `headBucket`
-     * repond alors immediatement sans jamais atteindre `createBucket`. La
-     * stack de test n'a pas cet aide-la (deliberement, cf. plan T4) : c'est
-     * ici, et nulle part ailleurs, que le bucket de test nait.
+     * `minio-create-bucket` de `compose.yaml` l'a deja fait, et
+     * `$createBucketIfMissing` vaut `false` : cette methode n'est alors jamais
+     * appelee. La stack de test n'a pas cette aide-la (deliberement, cf. plan
+     * T4) : c'est ici, et nulle part ailleurs, que le bucket de test nait.
      */
     private function ensureBucketExists(): void
     {
@@ -155,11 +183,19 @@ final readonly class S3MediaStorage implements MediaStorageInterface
             $this->logger->notice('Bucket media cree car absent au demarrage');
         } catch (AwsException $exception) {
             // Concurrence : un autre process a pu le creer entre le HEAD et le
-            // CREATE. Ce n'est pas un echec, jamais la cle en clair au-dela du
-            // code d'erreur AWS.
-            if ('BucketAlreadyOwnedByYou' !== $exception->getAwsErrorCode()) {
+            // CREATE. MinIO et S3 ne repondent pas forcement le meme code dans
+            // ce cas : ni l'un ni l'autre n'est un echec, jamais la cle en
+            // clair au-dela du code d'erreur AWS.
+            if (!\in_array($exception->getAwsErrorCode(), ['BucketAlreadyOwnedByYou', 'BucketAlreadyExists'], true)) {
                 throw $exception;
             }
         }
+    }
+
+    /** Absence genuine de l'objet ou du bucket, quelle que soit la forme exacte de la reponse AWS/MinIO. */
+    private function isMissingObject(AwsException $exception): bool
+    {
+        return \in_array($exception->getAwsErrorCode(), ['NoSuchKey', 'NotFound', 'NoSuchBucket'], true)
+            || 404 === $exception->getStatusCode();
     }
 }

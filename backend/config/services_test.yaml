@@ -1,5 +1,23 @@
 # Substitutions valables uniquement en environnement de test.
+parameters:
+    # Seul environnement sans `minio-create-bucket` : c'est ce parametre qui
+    # fait naitre le bucket au premier acces (cf. `services.yaml`).
+    media.create_bucket_if_missing: true
+
 services:
+    # `InMemoryTransport::getSent()` ne convient PAS pour compter les
+    # dispatches a travers plusieurs requetes d'un meme test : le
+    # `ServicesResetter` de Symfony vide les services `kernel.reset` apres
+    # CHAQUE requete HTTP, y compris avec `disableReboot()` (qui empeche
+    # seulement la RECONSTRUCTION du conteneur). `MediaCommandSpy` ecoute un
+    # evenement dispatche AVANT tout transport, donc insensible a ce
+    # nettoyage — cf. UploadFlowTest::testConfirmingTheUploadIsIdempotent.
+    App\Tests\Support\MediaCommandSpy:
+        public: true
+        tags:
+            - { name: kernel.event_listener, event: Symfony\Component\Messenger\Event\SendMessageToTransportsEvent, method: onSendMessageToTransports }
+
+
     # Aucun hub Mercure n'est leve pendant les tests : l'espion permet
     # d'assertionner le topic ET la charge utile, ce qu'un hub reel ne
     # permettrait pas sans s'y abonner.

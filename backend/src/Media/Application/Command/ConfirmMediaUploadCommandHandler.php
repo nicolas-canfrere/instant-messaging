@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Media\Application\Command;
 
-use App\Media\Domain\MediaNotOwnedException;
+use App\Media\Domain\MediaNotFoundException;
 use App\Media\Domain\MediaRepositoryInterface;
 use App\Media\Domain\MediaStatus;
 use App\Shared\Application\Bus\CommandDispatcherInterface;
@@ -24,17 +24,20 @@ final readonly class ConfirmMediaUploadCommandHandler implements CommandHandlerI
 
     public function __invoke(ConfirmMediaUploadCommand $command): void
     {
-        // `ofId` leve MediaNotFoundException — traduite en 404, indistinguable
-        // du media d'un autre qui n'existe pas.
+        // `ofId` leve MediaNotFoundException — traduite en 404. Un acteur sans
+        // lien avec ce media (juste en dessous) leve la MEME exception : les
+        // deux cas doivent rester indistinguables, sinon un 403 confirmerait a
+        // Bob que le media d'Alice existe (CLAUDE.md, « 404 et non 403 pour
+        // un non-membre » — ici, un non-proprietaire).
         $media = $this->media->ofId($command->mediaId);
 
         if (!$media->ownerId()->equals($command->confirmedBy)) {
-            $this->logger->warning('Confirmation du media {media_id} par un non-proprietaire', [
+            $this->logger->warning('Confirmation du media {media_id} par un acteur qui n\'y a aucun droit', [
                 'media_id' => $command->mediaId->toString(),
                 'actor_id' => $command->confirmedBy->toString(),
             ]);
 
-            throw MediaNotOwnedException::forMedia($command->mediaId);
+            throw MediaNotFoundException::withId($command->mediaId);
         }
 
         // Le backend ne verifie PAS ici que l'objet existe dans le bucket : ce
