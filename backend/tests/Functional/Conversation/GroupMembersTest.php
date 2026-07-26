@@ -110,6 +110,29 @@ final class GroupMembersTest extends DatabaseTestCase
         self::assertCount(1, (array) $this->json()['members']);
     }
 
+    /**
+     * La porte d'a cote de AdminCannotLeaveException : l'unique admin a tous
+     * les droits sur la route de retrait, il pouvait donc s'y exclure lui-meme
+     * et laisser un groupe que plus personne ne peut administrer.
+     */
+    public function testTheOnlyAdminCannotRemoveThemself(): void
+    {
+        $this->login('alice');
+        $aliceId = $this->userId('alice');
+        $groupId = $this->createGroup('Equipe', [$this->userId('bob')]);
+
+        $this->client->request('DELETE', sprintf('/api/conversations/%s/members/%s', $groupId, $aliceId));
+
+        self::assertResponseStatusCodeSame(409);
+
+        /** @var array{type: string} $problem */
+        $problem = $this->json();
+        self::assertSame('/problems/last-admin-cannot-be-removed', $problem['type']);
+
+        $this->client->request('GET', sprintf('/api/conversations/%s', $groupId));
+        self::assertCount(2, (array) $this->json()['members']);
+    }
+
     /** La composition d'un direct est fixe : la modifier n'a pas de sens. */
     public function testMembersOfADirectCannotBeChanged(): void
     {

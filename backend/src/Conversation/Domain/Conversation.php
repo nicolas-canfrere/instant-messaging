@@ -180,12 +180,22 @@ final class Conversation
         $this->notifyJoined($userId);
     }
 
+    /**
+     * Le geste de l'admin sur quelqu'un d'autre — ou sur lui-meme, la route de
+     * retrait ne l'interdit pas. D'ou le garde : sans lui, l'unique admin
+     * s'excluerait lui-meme et contournerait AdminCannotLeaveException par la
+     * porte d'a cote, laissant un groupe que plus personne ne peut administrer.
+     */
     public function removeMember(UserId $userId): void
     {
         $this->assertIsGroup();
 
         if (!$this->hasMember($userId)) {
             return;
+        }
+
+        if ($this->isLastAdmin($userId)) {
+            throw LastAdminCannotBeRemovedException::forUser($userId);
         }
 
         $this->members = array_values(array_filter(
@@ -215,6 +225,24 @@ final class Conversation
         }
 
         $this->removeMember($userId);
+    }
+
+    /**
+     * Formule au singulier ce que la regle protege : tant qu'il reste un autre
+     * admin, retirer celui-ci ne laisse pas le groupe orphelin.
+     */
+    private function isLastAdmin(UserId $userId): bool
+    {
+        if (!$this->isAdmin($userId)) {
+            return false;
+        }
+
+        $admins = array_filter(
+            $this->members,
+            static fn(Member $member): bool => MemberRole::Admin === $member->role,
+        );
+
+        return 1 === \count($admins);
     }
 
     /**

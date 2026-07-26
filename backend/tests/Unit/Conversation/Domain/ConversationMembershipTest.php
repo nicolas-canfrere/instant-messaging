@@ -6,6 +6,10 @@ namespace App\Tests\Unit\Conversation\Domain;
 
 use App\Conversation\Domain\AdminCannotLeaveException;
 use App\Conversation\Domain\Conversation;
+use App\Conversation\Domain\ConversationType;
+use App\Conversation\Domain\LastAdminCannotBeRemovedException;
+use App\Conversation\Domain\Member;
+use App\Conversation\Domain\MemberRole;
 use App\Conversation\Domain\NotAGroupException;
 use App\Shared\Domain\Event\MembershipChange;
 use App\Shared\Domain\Event\MembershipChanged;
@@ -122,6 +126,53 @@ final class ConversationMembershipTest extends TestCase
         $this->expectException(NotAGroupException::class);
 
         $direct->leave(UserId::fromString(self::BOB));
+    }
+
+    /**
+     * Le trou que fermait cette regle : l'unique admin s'excluait lui-meme par
+     * la route de retrait — sur laquelle il a evidemment les droits — et
+     * contournait ainsi AdminCannotLeaveException. Le groupe restait sans
+     * personne pour l'administrer, et `addMember()` n'attribuant que le role de
+     * simple membre, plus aucun admin ne pouvait y etre nomme.
+     */
+    public function testTheLastAdminCannotBeRemoved(): void
+    {
+        $group = $this->group();
+
+        $this->expectException(LastAdminCannotBeRemovedException::class);
+
+        try {
+            $group->removeMember(UserId::fromString(self::ALICE));
+        } finally {
+            self::assertTrue($group->hasMember(UserId::fromString(self::ALICE)));
+            self::assertSame([], $group->releaseEvents());
+        }
+    }
+
+    /** La regle protege le dernier admin, pas le titre d'admin en lui-meme. */
+    public function testAnAdminCanBeRemovedWhileAnotherRemains(): void
+    {
+        $joinedAt = new \DateTimeImmutable('2026-07-25 09:00:00');
+
+        // Par `reconstitute()` : rien ne cree deux admins aujourd'hui, la
+        // promotion n'existant pas. La regle, elle, doit deja etre juste.
+        $group = Conversation::reconstitute(
+            ConversationId::fromString(self::CONVERSATION),
+            ConversationType::Group,
+            'Equipe projet',
+            null,
+            UserId::fromString(self::ALICE),
+            $joinedAt,
+            [
+                new Member(UserId::fromString(self::ALICE), MemberRole::Admin, $joinedAt),
+                new Member(UserId::fromString(self::BOB), MemberRole::Admin, $joinedAt),
+            ],
+        );
+
+        $group->removeMember(UserId::fromString(self::ALICE));
+
+        self::assertFalse($group->hasMember(UserId::fromString(self::ALICE)));
+        self::assertTrue($group->isAdmin(UserId::fromString(self::BOB)));
     }
 
     public function testEventsAreReleasedOnlyOnce(): void
