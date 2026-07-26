@@ -1,4 +1,5 @@
-import type { ConversationSummary, UserSummary } from '../api/types';
+import type { ConversationSummary, Me, UserSummary } from '../api/types';
+import { CurrentUserBar } from './CurrentUserBar';
 import { viewerLocale, viewerTimeZone } from './dates';
 import { conversationTitle, formatListDate } from './labels';
 import { PresenceDot } from './PresenceDot';
@@ -10,8 +11,11 @@ type Props = {
   /** Pairs en ligne, rafraichi a chaque battement de coeur. */
   onlineUserIds: Set<string>;
   selectedId: string | null;
+  /** Le porteur de la session, affiche en pied de colonne. */
+  me: Me;
   onSelect: (conversationId: string) => void;
   onNewConversation: () => void;
+  onLogout: () => void;
 };
 
 /**
@@ -25,8 +29,10 @@ export function ConversationList({
   peers,
   onlineUserIds,
   selectedId,
+  me,
   onSelect,
   onNewConversation,
+  onLogout,
 }: Props) {
   // Resolus une fois par rendu de liste plutot qu'a chaque conversation : ces
   // appels Intl ne sont pas gratuits, et la valeur ne change pas en cours de
@@ -35,7 +41,13 @@ export function ConversationList({
   const locale = viewerLocale();
 
   return (
-    <nav className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white">
+    /*
+      Le defilement est descendu du `nav` vers la liste seule (ci-dessous) :
+      pose ici, il emporterait l'en-tete et le bandeau d'identite hors de l'ecran
+      des que la liste depasse la hauteur disponible. La colonne est donc une
+      pile de trois etages dont seul celui du milieu defile.
+    */
+    <nav className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-white">
       <div className="flex items-center justify-between px-4 py-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           Conversations
@@ -55,61 +67,65 @@ export function ConversationList({
         </button>
       </div>
 
-      {conversations.length === 0 && (
-        <p className="px-4 py-2 text-sm text-slate-400">Aucune conversation.</p>
-      )}
+      <div className="flex-1 overflow-y-auto">
+        {conversations.length === 0 && (
+          <p className="px-4 py-2 text-sm text-slate-400">Aucune conversation.</p>
+        )}
 
-      <ul>
-        {conversations.map((conversation) => {
-          const active = conversation.id === selectedId;
+        <ul>
+          {conversations.map((conversation) => {
+            const active = conversation.id === selectedId;
 
-          return (
-            <li key={conversation.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(conversation.id)}
-                aria-current={active ? 'true' : undefined}
-                className={`flex w-full flex-col gap-1 border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${
-                  active ? 'bg-slate-100' : ''
-                }`}
-              >
-                <span className="flex items-baseline justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    {/*
-                      Uniquement sur un direct : dans un groupe, une pastille
-                      unique ne saurait pas de quel membre elle parle.
-                    */}
-                    {conversation.type === 'direct' && (
-                      <PresenceDot online={onlineUserIds.has(peers[conversation.id] ?? '')} />
-                    )}
-                    <span className="truncate font-medium text-slate-900">
-                      {conversationTitle(conversation, users, peers)}
+            return (
+              <li key={conversation.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(conversation.id)}
+                  aria-current={active ? 'true' : undefined}
+                  className={`flex w-full flex-col gap-1 border-b border-slate-100 px-4 py-3 text-left hover:bg-slate-50 ${
+                    active ? 'bg-slate-100' : ''
+                  }`}
+                >
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      {/*
+                        Uniquement sur un direct : dans un groupe, une pastille
+                        unique ne saurait pas de quel membre elle parle.
+                      */}
+                      {conversation.type === 'direct' && (
+                        <PresenceDot online={onlineUserIds.has(peers[conversation.id] ?? '')} />
+                      )}
+                      <span className="truncate font-medium text-slate-900">
+                        {conversationTitle(conversation, users, peers)}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
+                      {conversation.last_message_at
+                        ? formatListDate(conversation.last_message_at, timeZone, locale)
+                        : ''}
+
+                      {conversation.unread_count > 0 && (
+                        <span
+                          className="ml-2 rounded-full bg-sky-600 px-2 py-0.5 text-xs font-medium text-white"
+                          aria-label={`${conversation.unread_count} messages non lus`}
+                        >
+                          {conversation.unread_count > 99 ? '99+' : conversation.unread_count}
+                        </span>
+                      )}
                     </span>
                   </span>
-                  <span className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
-                    {conversation.last_message_at
-                      ? formatListDate(conversation.last_message_at, timeZone, locale)
-                      : ''}
 
-                    {conversation.unread_count > 0 && (
-                      <span
-                        className="ml-2 rounded-full bg-sky-600 px-2 py-0.5 text-xs font-medium text-white"
-                        aria-label={`${conversation.unread_count} messages non lus`}
-                      >
-                        {conversation.unread_count > 99 ? '99+' : conversation.unread_count}
-                      </span>
-                    )}
+                  <span className="truncate text-sm text-slate-500">
+                    {conversation.last_message_preview ?? 'Aucun message'}
                   </span>
-                </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
 
-                <span className="truncate text-sm text-slate-500">
-                  {conversation.last_message_preview ?? 'Aucun message'}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <CurrentUserBar me={me} onLogout={onLogout} />
     </nav>
   );
 }

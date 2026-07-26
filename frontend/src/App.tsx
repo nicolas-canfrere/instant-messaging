@@ -47,7 +47,24 @@ export default function App() {
     return <LoginScreen onAuthenticated={(me) => setSession({ state: 'authenticated', me })} />;
   }
 
-  return <Workspace me={session.me} />;
+  // La deconnexion vit ici et non dans `Workspace` : c'est `App` qui possede
+  // l'etat de session, et lui seul peut repasser en anonyme. Demonter
+  // `Workspace` ferme l'`EventSource` par le cleanup de `useAppState` — il n'y
+  // a rien de plus a fermer a la main.
+  async function logout() {
+    try {
+      await api.logout();
+      setSession({ state: 'anonymous' });
+    } catch (cause) {
+      // On RESTE connecte sur un echec : la session serveur est encore valide.
+      // Basculer en anonyme afficherait l'ecran de connexion alors que le
+      // cookie authentifie toujours, et le moindre rechargement reconnecterait
+      // tout seul — plus deroutant que l'erreur elle-meme.
+      window.alert(cause instanceof ProblemError ? cause.detail : 'Deconnexion impossible.');
+    }
+  }
+
+  return <Workspace me={session.me} onLogout={() => void logout()} />;
 }
 
 /**
@@ -56,7 +73,7 @@ export default function App() {
  * monter seulement une fois authentifie garantit qu'aucun EventSource n'est
  * ouvert avant que la session soit connue.
  */
-function Workspace({ me }: { me: Me }) {
+function Workspace({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const {
     users,
     peers,
@@ -90,8 +107,10 @@ function Workspace({ me }: { me: Me }) {
         peers={peers}
         onlineUserIds={onlineUserIds}
         selectedId={selectedId}
+        me={me}
         onSelect={selectConversation}
         onNewConversation={() => setCreating(true)}
+        onLogout={onLogout}
       />
 
       {selected === null ? (
