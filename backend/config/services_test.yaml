@@ -30,3 +30,10 @@ services:
 
     Psr\Clock\ClockInterface:
         alias: Symfony\Component\Clock\MockClock
+
+    # Rien ne consomme encore ce port (la tache 5 y ajoutera un handler) : le
+    # compilateur retire sinon le service comme inutilise, et le test ne peut
+    # plus le recuperer par le conteneur.
+    App\Media\Domain\MediaRepositoryInterface:
+        alias: App\Media\Infrastructure\Persistence\DbalMediaRepository
+        public: true
