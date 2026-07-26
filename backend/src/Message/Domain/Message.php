@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Message\Domain;
 
+use App\Shared\Domain\Event\MessageWasDeleted;
 use App\Shared\Domain\Event\MessageWasSent;
 use App\Shared\Domain\Event\RecordsEventsTrait;
 use App\Shared\Domain\Identifier\ConversationId;
@@ -111,5 +112,30 @@ final class Message
     public function isDeleted(): bool
     {
         return null !== $this->deletedAt;
+    }
+
+    /**
+     * « Supprimer pour tous » : record soft, payload hard. L'enregistrement
+     * reste — id, expediteur, instant, donc l'ordre et les watermarks qui le
+     * designent — mais la charge utile est reellement effacee.
+     *
+     * Rejouer la suppression n'enregistre AUCUN evenement et conserve le premier
+     * instant. C'est ce qui fait de DELETE une operation idempotente par
+     * construction, sans condition dans le handler ni dans la couche HTTP.
+     */
+    public function deleteForEveryone(UserId $actor, \DateTimeImmutable $now): void
+    {
+        if (!$this->senderId->equals($actor)) {
+            throw NotTheAuthorException::forMessage($this->id);
+        }
+
+        if ($this->isDeleted()) {
+            return;
+        }
+
+        $this->content = null;
+        $this->deletedAt = $now;
+
+        $this->recordEvent(new MessageWasDeleted($this->id, $this->conversationId, $this->senderId, $now));
     }
 }

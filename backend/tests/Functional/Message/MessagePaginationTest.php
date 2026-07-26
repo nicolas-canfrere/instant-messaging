@@ -205,11 +205,6 @@ final class MessagePaginationTest extends DatabaseTestCase
         return $body;
     }
 
-    private function firstConversationId(): string
-    {
-        return $this->conversations()[0]['id'];
-    }
-
     private function conversationIdOfType(string $type): string
     {
         foreach ($this->conversations() as $conversation) {
