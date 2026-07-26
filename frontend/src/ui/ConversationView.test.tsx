@@ -71,6 +71,7 @@ describe('ConversationView', () => {
       onDeleteMessage: vi.fn(),
       onEditMessage: vi.fn(),
       onTyping: vi.fn(),
+      onLeave: vi.fn(async () => {}),
     };
 
     const { container, rerender } = render(

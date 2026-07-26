@@ -22,6 +22,7 @@ type Props = {
   onDeleteMessage: (messageId: string) => void;
   onEditMessage: (messageId: string, content: string) => void;
   onTyping: () => void;
+  onLeave: () => Promise<void>;
 };
 
 export function ConversationView({
@@ -37,6 +38,7 @@ export function ConversationView({
   onDeleteMessage,
   onEditMessage,
   onTyping,
+  onLeave,
 }: Props) {
   // Etat purement local d'affichage : personne d'autre n'a besoin de savoir si
   // le panneau des membres est ouvert. Il vit donc ici, pas dans `useAppState`.
@@ -117,6 +119,8 @@ export function ConversationView({
         <MembersPanel
           conversationId={conversation.id}
           users={users}
+          meId={meId}
+          onLeave={onLeave}
           onClose={() => setShowMembers(false)}
         />
       )}
