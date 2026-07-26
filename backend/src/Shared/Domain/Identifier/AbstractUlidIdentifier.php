@@ -14,15 +14,18 @@ namespace App\Shared\Domain\Identifier;
 abstract class AbstractUlidIdentifier implements \Stringable
 {
     /**
-     * Base32 Crockford : ni I, ni L, ni O, ni U. Premier caractere <= 7
-     * (timestamp sur 48 bits).
+     * Motif nu, sans delimiteurs : base32 Crockford, ni I, ni L, ni O, ni U.
+     * Premier caractere <= 7 (timestamp sur 48 bits). 26 caracteres au total.
      *
-     * Publique parce que les contraintes de validation des charges utiles s'y
-     * referent : c'est LA definition du format, elle ne doit exister qu'ici.
+     * Utilisable en `requirements:` de route.
      */
-    /** Motif nu, sans delimiteurs : utilisable en `requirements` de route. */
     public const string ROUTE_PATTERN = '[0-7][0-9A-HJKMNP-TV-Z]{25}';
 
+    /**
+     * Forme delimitee et ancree du motif, consommee par les contraintes de
+     * validation des charges utiles et par le constructeur. C'est ici, et
+     * nulle part ailleurs, que le format est defini.
+     */
     public const string PATTERN = '/^' . self::ROUTE_PATTERN . '$/';
 
     /** @var non-empty-string */

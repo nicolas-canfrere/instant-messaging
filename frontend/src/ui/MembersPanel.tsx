@@ -65,7 +65,7 @@ export function MembersPanel({ conversationId, users, meId, onLeave, onClose }: 
   );
 
   async function leave() {
-    if (!window.confirm('Quitter cette conversation ? Vous ne la verrez plus.')) return;
+    if (!window.confirm('Quitter ce groupe ? Vous ne le verrez plus.')) return;
 
     setBusy(true);
     setError(null);

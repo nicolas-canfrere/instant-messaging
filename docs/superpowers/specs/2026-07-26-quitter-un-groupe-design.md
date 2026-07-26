@@ -222,6 +222,11 @@ ne liste que les conversations dont on est membre.
   référence pas `conversation_members`.
 - On ne revient pas seul. Il n'existe pas d'endpoint « rejoindre » ; un admin doit ré-ajouter
   la personne, ce que `AddMembers` fait déjà pour un ancien membre.
+- Le `requirements: ['userId' => AbstractUlidIdentifier::ROUTE_PATTERN]` posé sur la route
+  d'exclusion fait qu'un `{userId}` malformé ne matche plus du tout la route : la réponse
+  passe de 422 `/problems/validation-failed` (levé par `UserId::fromString()`) à 404
+  `/problems/resource-not-found`. Acceptable : un client ne peut de toute façon pas
+  distinguer un identifiant malformé d'une conversation inexistante, et le 404 ne fuit rien.
 
 ## Hors périmètre
 
