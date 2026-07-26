@@ -197,6 +197,27 @@ final class Conversation
     }
 
     /**
+     * Partir de son propre chef. Distincte de `removeMember()`, qui est le
+     * geste de l'admin : deux regles differentes sur la meme mutation. Un admin
+     * ne peut pas partir tant qu'il n'a pas transfere ses droits — sans quoi le
+     * groupe se retrouverait sans personne pour en gerer la composition.
+     */
+    public function leave(UserId $userId): void
+    {
+        $this->assertIsGroup();
+
+        if (!$this->hasMember($userId)) {
+            return;
+        }
+
+        if ($this->isAdmin($userId)) {
+            throw AdminCannotLeaveException::forUser($userId);
+        }
+
+        $this->removeMember($userId);
+    }
+
+    /**
      * Le createur n'est jamais notifie : il vient d'agir, il connait deja le
      * fil. Ne pas l'exclure lui ferait rouvrir son propre flux temps reel pour
      * rien a chaque creation.

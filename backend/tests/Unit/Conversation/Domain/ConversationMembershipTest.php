@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Conversation\Domain;
 
+use App\Conversation\Domain\AdminCannotLeaveException;
 use App\Conversation\Domain\Conversation;
 use App\Conversation\Domain\NotAGroupException;
 use App\Shared\Domain\Event\MembershipChange;
@@ -62,6 +63,65 @@ final class ConversationMembershipTest extends TestCase
         self::assertInstanceOf(MembershipChanged::class, $events[0]);
         self::assertSame(MembershipChange::Left, $events[0]->change);
         self::assertFalse($group->hasMember(UserId::fromString(self::BOB)));
+    }
+
+    public function testAPlainMemberCanLeaveTheGroup(): void
+    {
+        $group = $this->group();
+        $group->leave(UserId::fromString(self::BOB));
+
+        $events = $group->releaseEvents();
+
+        self::assertCount(1, $events);
+        self::assertInstanceOf(MembershipChanged::class, $events[0]);
+        self::assertSame(self::BOB, $events[0]->userId->toString());
+        self::assertSame(MembershipChange::Left, $events[0]->change);
+        self::assertFalse($group->hasMember(UserId::fromString(self::BOB)));
+    }
+
+    /**
+     * Le role ne MANQUE pas, il est trop eleve : l'admin doit d'abord
+     * transferer ses droits. Le transfert n'existe pas encore, c'est assume.
+     */
+    public function testAnAdminCannotLeaveTheGroup(): void
+    {
+        $group = $this->group();
+
+        $this->expectException(AdminCannotLeaveException::class);
+
+        try {
+            $group->leave(UserId::fromString(self::ALICE));
+        } finally {
+            self::assertTrue($group->hasMember(UserId::fromString(self::ALICE)));
+            self::assertSame([], $group->releaseEvents());
+        }
+    }
+
+    /** Un second depart ne doit pas republier un evenement au hub. */
+    public function testLeavingTwiceIsANoOp(): void
+    {
+        $group = $this->group();
+        $group->leave(UserId::fromString(self::BOB));
+        $group->releaseEvents();
+
+        $group->leave(UserId::fromString(self::BOB));
+
+        self::assertSame([], $group->releaseEvents());
+    }
+
+    /** Un direct a deux participants pour toujours : on n'en part pas. */
+    public function testNobodyCanLeaveADirect(): void
+    {
+        $direct = Conversation::direct(
+            ConversationId::fromString(self::CONVERSATION),
+            UserId::fromString(self::ALICE),
+            UserId::fromString(self::BOB),
+            new \DateTimeImmutable('2026-07-25 09:00:00'),
+        );
+
+        $this->expectException(NotAGroupException::class);
+
+        $direct->leave(UserId::fromString(self::BOB));
     }
 
     public function testEventsAreReleasedOnlyOnce(): void
