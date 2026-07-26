@@ -59,10 +59,27 @@ final class Version20260726071322 extends AbstractMigration
 
     public function down(Schema $schema): void
     {
-        // Le contenu des tombstones est definitivement perdu : on les supprime
-        // plutot que de laisser `ALTER COLUMN SET NOT NULL` echouer.
-        $this->addSql('DELETE FROM messages WHERE deleted_at IS NOT NULL');
+        // La contrainte tombe EN PREMIER : elle interdit un contenu non nul sur
+        // un message supprime, donc le remplissage ci-dessous echouerait tant
+        // qu'elle est en place.
         $this->addSql('ALTER TABLE messages DROP CONSTRAINT messages_tombstone_has_no_payload');
+
+        // On remplit, on ne supprime pas. Un `DELETE` laisserait
+        // `conversations.last_message_id` et les deux watermarks de la tranche 2
+        // designer des lignes disparues, et creuserait un trou dans la
+        // pagination keyset : exactement les references pendantes que le
+        // tombstone existe pour empecher. Une retro-migration ne doit pas
+        // rouvrir le bug que la tranche a ferme.
+        //
+        // Le contenu d'origine est DEFINITIVEMENT perdu — « record soft,
+        // payload hard » l'efface reellement, aucune retro-migration ne peut le
+        // retrouver. On prefere donc un tombstone marque et lisible a un trou
+        // dans l'ordre. Et surtout pas une chaine vide :
+        // `MessageContent::fromString('')` leve `EmptyMessageContentException`,
+        // une base retrogradee exploserait a la relecture de ces lignes.
+        $this->addSql(<<<'SQL'
+            UPDATE messages SET content = '(message supprime)' WHERE content IS NULL
+            SQL);
         $this->addSql(<<<'SQL'
             ALTER TABLE messages
                 DROP COLUMN edited_at,
