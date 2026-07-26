@@ -9,6 +9,7 @@ use App\Shared\Domain\Event\MessageWasEdited;
 use App\Shared\Domain\Event\MessageWasSent;
 use App\Shared\Domain\Event\RecordsEventsTrait;
 use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Domain\Identifier\UserId;
 
@@ -22,11 +23,13 @@ final class Message
      */
     public const int EDIT_WINDOW_SECONDS = 900;
 
+    /** @param list<MediaId> $mediaIds */
     private function __construct(
         private readonly MessageId $id,
         private readonly ConversationId $conversationId,
         private readonly UserId $senderId,
         private ?MessageContent $content,
+        private array $mediaIds,
         private readonly ClientMessageId $clientMessageId,
         private readonly \DateTimeImmutable $createdAt,
         private ?\DateTimeImmutable $editedAt = null,
@@ -34,21 +37,31 @@ final class Message
     ) {
     }
 
+    /** @param list<MediaId> $mediaIds */
     public static function send(
         MessageId $id,
         ConversationId $conversationId,
         UserId $senderId,
-        MessageContent $content,
+        ?MessageContent $content,
+        array $mediaIds,
         ClientMessageId $clientMessageId,
         \DateTimeImmutable $now,
     ): self {
-        $message = new self($id, $conversationId, $senderId, $content, $clientMessageId, $now, null, null);
+        if (null === $content && [] === $mediaIds) {
+            throw EmptyMessageException::create();
+        }
+
+        $message = new self($id, $conversationId, $senderId, $content, $mediaIds, $clientMessageId, $now, null, null);
         $message->recordEvent(
             new MessageWasSent(
                 $id,
                 $conversationId,
                 $senderId,
-                $content->toString(),
+                // MessageWasSent n'est PAS modifie : sa charge utile reste un
+                // `string`, sans les medias. Un message image-seule y voyage
+                // avec un contenu vide ; la charge utile media arrivera par la
+                // tache 8, dans un evenement distinct.
+                $content?->toString() ?? '',
                 $clientMessageId->toString(),
                 $now,
             ),
@@ -61,18 +74,21 @@ final class Message
      * N'enregistre AUCUN evenement, et c'est le mecanisme central de
      * l'idempotence : un rejeu relit le message existant, donc ne republie
      * rien — sans le moindre `if`. Ne pas ajouter d'enregistrement ici.
+     *
+     * @param list<MediaId> $mediaIds
      */
     public static function reconstitute(
         MessageId $id,
         ConversationId $conversationId,
         UserId $senderId,
         ?MessageContent $content,
+        array $mediaIds,
         ClientMessageId $clientMessageId,
         \DateTimeImmutable $createdAt,
         ?\DateTimeImmutable $editedAt = null,
         ?\DateTimeImmutable $deletedAt = null,
     ): self {
-        return new self($id, $conversationId, $senderId, $content, $clientMessageId, $createdAt, $editedAt, $deletedAt);
+        return new self($id, $conversationId, $senderId, $content, $mediaIds, $clientMessageId, $createdAt, $editedAt, $deletedAt);
     }
 
     public function id(): MessageId
@@ -93,6 +109,12 @@ final class Message
     public function content(): ?MessageContent
     {
         return $this->content;
+    }
+
+    /** @return list<MediaId> */
+    public function mediaIds(): array
+    {
+        return $this->mediaIds;
     }
 
     public function clientMessageId(): ClientMessageId
@@ -141,6 +163,10 @@ final class Message
         }
 
         $this->content = null;
+        // Les images partent avec le texte. Un media detache devient orphelin
+        // et sera ramasse par la purge : les octets sont detruits, comme le
+        // texte l'etait (spec §7.2).
+        $this->mediaIds = [];
         $this->deletedAt = $now;
 
         $this->recordEvent(new MessageWasDeleted($this->id, $this->conversationId, $this->senderId, $now));

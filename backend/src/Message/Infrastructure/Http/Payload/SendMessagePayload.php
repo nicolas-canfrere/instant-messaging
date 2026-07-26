@@ -23,12 +23,25 @@ final readonly class SendMessagePayload
         // l'invariant du domaine, et il est le seul a faire foi. Cette
         // contrainte-ci est donc legerement plus stricte, ce qui est le bon
         // sens pour une garde de bordure.
-        #[Assert\NotBlank(message: 'Un message ne peut pas etre vide.')]
+        //
+        // `NotBlank` disparait : un message peut desormais n'etre QUE des
+        // images. C'est le controleur qui refuse un message sans texte NI
+        // media — une regle qui croise deux champs, donc pas une contrainte.
         #[Assert\Length(
             max: MessageContent::MAX_LENGTH,
             maxMessage: 'Un message ne peut pas depasser {{ limit }} caracteres.',
         )]
-        public string $content = '',
+        public ?string $content = null,
+
+        /** @var list<string> */
+        #[Assert\Count(max: 10, maxMessage: 'Un message ne peut pas porter plus de {{ limit }} images.')]
+        #[Assert\All([
+            new Assert\Regex(
+                pattern: AbstractUlidIdentifier::PATTERN,
+                message: 'Cet identifiant n\'est pas un ULID valide.',
+            ),
+        ])]
+        public array $mediaIds = [],
     ) {
     }
 }

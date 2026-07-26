@@ -7,9 +7,11 @@ namespace App\Message\Infrastructure\Http;
 use App\Message\Application\Command\SendMessageCommand;
 use App\Message\Application\Query\FindMessageByClientKeyQuery;
 use App\Message\Domain\ClientMessageId;
+use App\Message\Domain\EmptyMessageException;
 use App\Message\Domain\MessageContent;
 use App\Message\Infrastructure\Http\Payload\SendMessagePayload;
 use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Domain\IdGeneratorInterface;
 use App\Shared\Infrastructure\Bus\CommandDispatcher;
@@ -44,11 +46,24 @@ final readonly class SendMessageController
         $clientMessageId = ClientMessageId::fromString($payload->clientMessageId);
         $messageId = MessageId::fromString($this->idGenerator->generate());
 
+        $content = null === $payload->content ? null : MessageContent::fromString($payload->content);
+        $mediaIds = array_map(
+            static fn(string $mediaId): MediaId => MediaId::fromString($mediaId),
+            $payload->mediaIds,
+        );
+
+        // Regle qui depend de DEUX champs : elle ne peut pas s'exprimer en
+        // contrainte. Meme traitement que « un groupe requiert un titre ».
+        if (null === $content && [] === $mediaIds) {
+            throw EmptyMessageException::create();
+        }
+
         $this->commands->dispatch(new SendMessageCommand(
             $messageId,
             $conversationId,
             $senderId,
-            MessageContent::fromString($payload->content),
+            $content,
+            $mediaIds,
             $clientMessageId,
         ));
 

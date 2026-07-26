@@ -9,6 +9,7 @@ use App\Message\Domain\ClientMessageIdReusedException;
 use App\Message\Domain\ConversationNotAccessibleException;
 use App\Message\Domain\Message;
 use App\Message\Domain\MessageRepositoryInterface;
+use App\Message\Domain\Port\MediaOwnershipPortInterface;
 use App\Shared\Application\Bus\CommandHandlerInterface;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
@@ -18,6 +19,7 @@ final readonly class SendMessageCommandHandler implements CommandHandlerInterfac
     public function __construct(
         private MessageRepositoryInterface $messages,
         private ConversationMembershipInterface $membership,
+        private MediaOwnershipPortInterface $mediaOwnership,
         private ClockInterface $clock,
         private LoggerInterface $logger,
     ) {
@@ -36,11 +38,16 @@ final readonly class SendMessageCommandHandler implements CommandHandlerInterfac
             throw ConversationNotAccessibleException::withId($command->conversationId);
         }
 
+        // Meme raison : une verification hors transaction serait devancable
+        // par un second envoi qui attacherait le meme media en meme temps.
+        $this->mediaOwnership->assertUsableBy($command->mediaIds, $command->senderId);
+
         $message = Message::send(
             $command->messageId,
             $command->conversationId,
             $command->senderId,
             $command->content,
+            $command->mediaIds,
             $command->clientMessageId,
             $this->clock->now(),
         );
@@ -53,7 +60,8 @@ final readonly class SendMessageCommandHandler implements CommandHandlerInterfac
                 'message_id' => $message->id()->toString(),
                 'conversation_id' => $command->conversationId->toString(),
                 'sender_id' => $command->senderId->toString(),
-                'content_length' => mb_strlen($command->content->toString()),
+                'content_length' => null === $command->content ? 0 : mb_strlen($command->content->toString()),
+                'media_count' => count($command->mediaIds),
             ]);
 
             return;
@@ -82,7 +90,7 @@ final readonly class SendMessageCommandHandler implements CommandHandlerInterfac
         // Un tombstone n'a plus de contenu : `?->` rend alors `null`, qui ne
         // peut egaler la chaine entrante. Un rejeu sur un message supprime est
         // donc signale comme un contenu different, ce qui est exact.
-        if ($existing->content()?->toString() !== $command->content->toString()) {
+        if ($existing->content()?->toString() !== $command->content?->toString()) {
             $this->logger->warning(
                 'Rejeu de {client_message_id} avec un contenu different : le premier message est conserve',
                 [
