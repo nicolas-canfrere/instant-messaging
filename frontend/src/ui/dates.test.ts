@@ -55,7 +55,17 @@ describe('formatDaySeparator', () => {
 describe('formatRelative', () => {
   const now = new Date('2026-07-26T12:00:00+00:00');
 
-  it('rend un temps relatif en minutes', () => {
-    expect(formatRelative('2026-07-26T11:55:00+00:00', now, 'fr-FR')).toContain('5');
+  // Valeurs attendues ecrites en dur (verifiees dans le conteneur avec l'ICU
+  // reellement embarque) : recalculer l'attendu avec la meme fonction Intl que
+  // le code sous test ne prouverait rien, notamment sur le signe.
+  it('rend un temps relatif dans le passe en minutes', () => {
+    expect(formatRelative('2026-07-26T11:55:00+00:00', now, 'fr-FR')).toBe('il y a 5 minutes');
+  });
+
+  // Cas symetrique dans le futur : c'est precisement l'inversion de signe
+  // qu'un `toContain('5')` ne peut pas detecter (« il y a » et « dans »
+  // contiennent tous les deux le chiffre).
+  it('rend un temps relatif dans le futur en minutes', () => {
+    expect(formatRelative('2026-07-26T12:05:00+00:00', now, 'fr-FR')).toBe('dans 5 minutes');
   });
 });
