@@ -192,8 +192,16 @@ d'origine, et rien dans l'interface ne leur dira ce qu'il disait. Une fenêtre c
 à ce qu'elle sert vraiment, la correction d'une faute de frappe.
 
 Ce que ça apporte techniquement : un invariant **temporel** porté par l'agrégat, testable en gelant
-la `MockClock` déjà en place, sans base de données ni requête HTTP. C'est exactement la justification
-donnée en tranche 1 pour faire de l'horloge un port — elle trouve ici son second usage.
+l'horloge, sans base de données ni requête HTTP. C'est exactement la justification donnée en tranche 1
+pour faire de l'horloge un port — elle trouve ici son second usage.
+
+> [!note] L'horloge substituable est **posée par cette tranche**, elle n'existait pas avant
+> Les handlers reçoivent bien un `Psr\Clock\ClockInterface` depuis la tranche 1, mais aucune
+> substitution n'était configurée : l'environnement de test utilisait l'horloge réelle, et un test
+> ne pouvait donc pas faire vieillir un message. `config/services_test.yaml` alias désormais le port
+> vers la `MockClock` de `symfony/clock`, gelée et publique. Sans elle, la fenêtre d'édition n'aurait
+> de couverture qu'unitaire, et sa **traduction** en 403 `/problems/edit-window-expired` — le chemin
+> qu'emprunte un appel forgé, donc le critère d'acceptation n°3 — ne serait exercée par aucun test.
 
 `EDIT_WINDOW_SECONDS = 900` est une constante de l'agrégat, en `SCREAMING_SNAKE_CASE`, et non un
 paramètre de configuration : c'est une règle métier, pas un réglage d'exploitation.
@@ -446,6 +454,25 @@ un vide. Recompter les non-lus à chaque suppression demanderait à `Message` de
 Coût de cette décision : zéro ligne de code. Elle est écrite parce qu'une décision non écrite est un
 oubli déguisé.
 
+### 6.4 L'aperçu d'une conversation dont le dernier message est un tombstone
+
+Supprimer le dernier message vide `last_message_preview` (§7). `ConversationList` affiche alors
+« Aucun message », **par repli sur `last_message_preview ?? 'Aucun message'`** — et c'est faux : le
+fil contient un tombstone, il n'est pas vide.
+
+C'est une **conséquence assumée du choix de l'aperçu dénormalisé**. La liste de gauche est servie
+sans jointure vers `messages` : elle ne dispose que d'une chaîne, et une chaîne absente ne peut pas
+distinguer « rien n'a jamais été envoyé » de « le dernier message a été retiré ». Les deux se lisent
+`NULL`.
+
+Distinguer les deux cas demanderait à `ConversationSummary` de porter l'information — un troisième
+état, ou un `last_message_deleted_at`. C'est un **changement de contrat de lecture**, donc un
+changement cassant, pour un libellé. Hors périmètre de cette tranche.
+
+Le jour où T4 ou T5 touchera à `ConversationSummary` pour une autre raison, le champ s'ajoutera dans
+le même mouvement. En attendant, la limite est écrite : une limite écrite est une décision, une limite
+découverte plus tard est un bug.
+
 ---
 
 ## Section 7 — Chorégraphie : l'aperçu de conversation
@@ -644,7 +671,8 @@ rend les six suivantes additives et relisibles.
 général (T5) · historique des versions d'un message · hard delete RGPD et crypto-shredding · messages
 éphémères et purge par TTL · préférence de fuseau persistée côté serveur · reprise `Last-Event-ID` sur
 `message.edited` et `message.deleted` (§4.2) · annulation d'une suppression · notification aux
-destinataires qu'un message a été édité hors de leur vue courante.
+destinataires qu'un message a été édité hors de leur vue courante · distinction, dans l'aperçu de la
+liste de conversations, entre « aucun message » et « dernier message supprimé » (§6.4).
 
 ---
 

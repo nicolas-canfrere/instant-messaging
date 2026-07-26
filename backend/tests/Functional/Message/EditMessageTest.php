@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Message;
 
+use App\Message\Domain\Message;
 use App\Tests\Functional\DatabaseTestCase;
 use App\Tests\Support\InMemoryEventPublisher;
+use Symfony\Component\Clock\MockClock;
 
 final class EditMessageTest extends DatabaseTestCase
 {
@@ -157,6 +159,108 @@ final class EditMessageTest extends DatabaseTestCase
         /** @var array{type: string, violations?: list<array{field: string, message: string}>} $problem */
         $problem = $this->json();
         self::assertSame('/problems/validation-failed', $problem['type']);
+    }
+
+    /**
+     * Le critere d'acceptation n°3 de la tranche, cote serveur. L'unitaire
+     * couvre l'invariant de l'agregat ; ici c'est sa TRADUCTION en 403 et en
+     * `type` du catalogue qui est verifiee — le chemin qu'un appel forge suit.
+     */
+    public function testEditingAfterTheWindowIsForbidden(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $messageId = $this->send($conversationId, self::CLIENT_ID, 'bonjor');
+
+        // Une seconde de plus que la fenetre, sur l'horloge que le conteneur de
+        // test substitue. Aucune attente reelle : le message vieillit, pas la
+        // suite de tests.
+        $this->clock()->sleep(Message::EDIT_WINDOW_SECONDS + 1);
+
+        $this->edit($conversationId, $messageId, 'trop tard');
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertResponseHeaderSame('Content-Type', 'application/problem+json');
+
+        /** @var array{type: string} $problem */
+        $problem = $this->json();
+        self::assertSame('/problems/edit-window-expired', $problem['type']);
+    }
+
+    /** L'autre cote de la borne : a la seconde pres, l'edition passe encore. */
+    public function testEditingOnTheLastSecondOfTheWindowIsAllowed(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $messageId = $this->send($conversationId, self::CLIENT_ID, 'bonjor');
+
+        $this->clock()->sleep(Message::EDIT_WINDOW_SECONDS);
+
+        $this->edit($conversationId, $messageId, 'bonjour');
+
+        self::assertResponseStatusCodeSame(200);
+    }
+
+    public function testItRequiresASession(): void
+    {
+        $this->client->request(
+            'PATCH',
+            '/api/conversations/01J9ZQ7X8K3M4N5P6Q7R8S9TZ1/messages/01J9ZQ7X8K3M4N5P6Q7R8S9TZ2',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['content' => 'bonjour'], \JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(401);
+    }
+
+    /**
+     * Carol n'est pas membre du direct alice/bob — `secondConversationId()` le
+     * rend, `firstConversationId()` rendant le groupe dont elle fait partie. Un
+     * non-membre recoit 404 et non 403 : un 403 confirmerait l'existence de la
+     * conversation.
+     */
+    public function testANonMemberGetsNotFound(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->secondConversationId();
+        $messageId = $this->send($conversationId, self::CLIENT_ID, 'entre nous');
+
+        $this->login('carol');
+        $this->edit($conversationId, $messageId, 'indiscret');
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertResponseHeaderSame('Content-Type', 'application/problem+json');
+    }
+
+    /** Pas d'oracle : un identifiant inconnu et un message d'un autre fil sont indistinguables. */
+    public function testAMessageFromAnotherConversationIsNotFound(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $messageId = $this->send($conversationId, self::CLIENT_ID, 'ailleurs');
+
+        $otherConversationId = $this->secondConversationId();
+
+        $this->edit($otherConversationId, $messageId, 'deplace');
+        self::assertResponseStatusCodeSame(404);
+        /** @var array{type: string, title: string} $wrongConversation */
+        $wrongConversation = $this->json();
+
+        $this->edit($otherConversationId, '01J9ZQ7X8K3M4N5P6Q7R8S9TZZ', 'inconnu');
+        self::assertResponseStatusCodeSame(404);
+        /** @var array{type: string, title: string} $unknown */
+        $unknown = $this->json();
+
+        self::assertSame($unknown['type'], $wrongConversation['type']);
+        self::assertSame($unknown['title'], $wrongConversation['title']);
+    }
+
+    private function clock(): MockClock
+    {
+        /** @var MockClock $clock */
+        $clock = static::getContainer()->get(MockClock::class);
+
+        return $clock;
     }
 
     private function edit(string $conversationId, string $messageId, string $content): void
