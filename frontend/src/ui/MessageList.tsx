@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type UIEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type UIEvent } from 'react';
 import type { UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
 import {
@@ -6,8 +6,9 @@ import {
   selectStatusFor,
   type ReceiptsState,
 } from '../store/receiptsReducer';
-import { deletedMessageLabel, formatTime, userName } from './labels';
+import { canStillEdit, deletedMessageLabel, editedMessageLabel, formatTime, userName } from './labels';
 import { MessageActions } from './MessageActions';
+import { MessageEditor } from './MessageEditor';
 import { ReceiptTicks } from './ReceiptTicks';
 import { useScrollAnchor } from './useScrollAnchor';
 
@@ -27,6 +28,7 @@ type Props = {
   isGroup: boolean;
   onLoadOlder: () => void;
   onDeleteMessage: (messageId: string) => void;
+  onEditMessage: (messageId: string, content: string) => void;
 };
 
 /**
@@ -44,10 +46,13 @@ export function MessageList({
   isGroup,
   onLoadOlder,
   onDeleteMessage,
+  onEditMessage,
 }: Props) {
   const container = useRef<HTMLDivElement | null>(null);
   /** L'utilisateur suivait-il le bas du fil juste avant ce rendu ? En ref : ne doit pas re-rendre. */
   const atBottom = useRef(true);
+  /** Le message actuellement en cours d'edition, ou aucun. Purement local a l'affichage. */
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Corrige le saut de scroll provoque par l'insertion d'une page plus ancienne
   // EN TETE de la liste. Doit etre appele avant l'effet de suivi ci-dessous :
@@ -110,9 +115,19 @@ export function MessageList({
           >
             <p className="text-xs opacity-60">
               {userName(users, message.senderId)} · {formatTime(message.createdAt)}
+              {message.editedAt !== null && ` · ${editedMessageLabel}`}
             </p>
             {message.deletedAt !== null ? (
               <p className="italic opacity-60">{deletedMessageLabel}</p>
+            ) : editingId === message.id ? (
+              <MessageEditor
+                initialContent={message.content ?? ''}
+                onSubmit={(content) => {
+                  setEditingId(null);
+                  onEditMessage(message.id as string, content);
+                }}
+                onCancel={() => setEditingId(null)}
+              />
             ) : (
               <p className="whitespace-pre-wrap break-words">{message.content}</p>
             )}
@@ -123,6 +138,11 @@ export function MessageList({
             */}
             {message.senderId === meId && message.id !== null && message.deletedAt === null && (
               <MessageActions
+                onEdit={
+                  canStillEdit(message.createdAt, Date.now())
+                    ? () => setEditingId(message.id)
+                    : null
+                }
                 onDelete={() => {
                   if (window.confirm('Supprimer ce message pour tout le monde ?')) {
                     onDeleteMessage(message.id as string);

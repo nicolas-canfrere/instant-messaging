@@ -98,6 +98,12 @@ export const api = {
     request<void>(`/api/conversations/${conversationId}/messages/${messageId}`, {
       method: 'DELETE',
     }),
+
+  editMessage: (conversationId: string, messageId: string, content: string) =>
+    request<ApiMessage>(`/api/conversations/${conversationId}/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    }),
 };
 
 export type { ApiMessage };

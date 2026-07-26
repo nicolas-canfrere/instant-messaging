@@ -60,3 +60,20 @@ export function formatListDate(isoDate: string): string {
  * pourra etre traduit sans toucher a l'API.
  */
 export const deletedMessageLabel = 'Ce message a été supprimé';
+
+/**
+ * Doit rester egal a `Message::EDIT_WINDOW_SECONDS` cote backend.
+ *
+ * C'est du CONFORT, pas de la securite : le serveur reste l'autorite et
+ * repondra 403 `/problems/edit-window-expired` a un appel forge. On masque
+ * seulement une action qui echouerait.
+ */
+export const EDIT_WINDOW_MS = 900_000;
+
+export function canStillEdit(createdAt: string, now: number): boolean {
+  const sentAt = new Date(createdAt).getTime();
+
+  return !Number.isNaN(sentAt) && now - sentAt <= EDIT_WINDOW_MS;
+}
+
+export const editedMessageLabel = 'modifié';

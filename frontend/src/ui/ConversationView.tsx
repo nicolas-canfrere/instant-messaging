@@ -20,6 +20,7 @@ type Props = {
   onLoadOlder: () => void;
   onSend: (content: string) => Promise<void>;
   onDeleteMessage: (messageId: string) => void;
+  onEditMessage: (messageId: string, content: string) => void;
   onTyping: () => void;
 };
 
@@ -34,6 +35,7 @@ export function ConversationView({
   onLoadOlder,
   onSend,
   onDeleteMessage,
+  onEditMessage,
   onTyping,
 }: Props) {
   // Etat purement local d'affichage : personne d'autre n'a besoin de savoir si
@@ -87,6 +89,7 @@ export function ConversationView({
           isGroup={conversation.type === 'group'}
           onLoadOlder={onLoadOlder}
           onDeleteMessage={onDeleteMessage}
+          onEditMessage={onEditMessage}
         />
 
         {/*

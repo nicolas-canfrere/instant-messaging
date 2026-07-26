@@ -71,6 +71,7 @@ function Workspace({ me }: { me: Me }) {
     loadOlder,
     send,
     deleteMessage,
+    editMessage,
     createDirect,
     createGroup,
   } = useAppState(me);
@@ -120,6 +121,18 @@ function Workspace({ me }: { me: Me }) {
             void deleteMessage(selected.id, messageId).catch((cause: unknown) => {
               window.alert(
                 cause instanceof ProblemError ? cause.detail : 'Suppression impossible.',
+              );
+            });
+          }}
+          // Meme motif que la suppression ci-dessus : une edition est un geste
+          // explicite (l'utilisateur vient de taper un texte corrige). L'avaler
+          // en silence laisserait croire que la correction est visible de tous
+          // alors qu'elle n'a jamais quitte le navigateur — pire que de ne rien
+          // avoir change.
+          onEditMessage={(messageId, content) => {
+            void editMessage(selected.id, messageId, content).catch((cause: unknown) => {
+              window.alert(
+                cause instanceof ProblemError ? cause.detail : 'Modification impossible.',
               );
             });
           }}

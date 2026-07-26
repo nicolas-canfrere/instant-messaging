@@ -299,3 +299,62 @@ describe('message/deleted', () => {
     );
   });
 });
+
+describe('message/edited', () => {
+  it('remplace le contenu et marque l instant d edition', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'bonjor' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/edited',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      content: 'bonjour',
+      editedAt: '2026-07-26T09:05:00+00:00',
+    });
+
+    const item = at(selectThread(next, 'c1').items, 0);
+    expect(item.content).toBe('bonjour');
+    expect(item.editedAt).toBe('2026-07-26T09:05:00+00:00');
+  });
+
+  it('ignore un identifiant absent du fil', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'intact' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/edited',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000Z',
+      content: 'ailleurs',
+      editedAt: '2026-07-26T09:05:00+00:00',
+    });
+
+    expect(at(selectThread(next, 'c1').items, 0).content).toBe('intact');
+  });
+
+  // L'echo SSE et la reponse du PATCH portent le MEME etat final : les
+  // appliquer dans n'importe quel ordre doit donner le meme resultat.
+  it('donne le meme resultat quel que soit l ordre d arrivee', () => {
+    const base = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'bonjor' }),
+    });
+
+    const action = {
+      type: 'message/edited' as const,
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      content: 'bonjour',
+      editedAt: '2026-07-26T09:05:00+00:00',
+    };
+
+    expect(messagesReducer(messagesReducer(base, action), action)).toEqual(
+      messagesReducer(base, action),
+    );
+  });
+});

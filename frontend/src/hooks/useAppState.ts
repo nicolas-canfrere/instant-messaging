@@ -55,6 +55,7 @@ const NAMED_EVENTS = [
   'typing.started',
   'receipt.updated',
   'message.deleted',
+  'message.edited',
 ];
 
 /**
@@ -187,6 +188,7 @@ export type AppState = {
   refreshConversations: () => Promise<void>;
   send: (conversationId: string, content: string) => Promise<void>;
   deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
+  editMessage: (conversationId: string, messageId: string, content: string) => Promise<void>;
   createDirect: (peerId: string) => Promise<void>;
   createGroup: (title: string, memberIds: string[]) => Promise<void>;
 };
@@ -324,6 +326,24 @@ export function useAppState(me: Me): AppState {
       await api.deleteMessage(conversationId, messageId);
       // Pas de dispatch ici : l'echo SSE pose l'etat, et il est idempotent.
       // Si le hub est injoignable, le rechargement de l'historique corrigera.
+    },
+    [],
+  );
+
+  const editMessage = useCallback(
+    async (conversationId: string, messageId: string, content: string) => {
+      const updated = await api.editMessage(conversationId, messageId, content);
+
+      // La reponse porte le meme etat final que l'echo SSE : l'appliquer ici
+      // aussi rend l'edition visible meme si le hub est injoignable, et
+      // l'operation est idempotente donc le doublon est sans consequence.
+      dispatch({
+        type: 'message/edited',
+        conversationId,
+        id: messageId,
+        content: updated.content ?? '',
+        editedAt: updated.edited_at ?? '',
+      });
     },
     [],
   );
@@ -516,6 +536,20 @@ export function useAppState(me: Me): AppState {
           return;
         }
 
+        if (event.type === 'message.edited') {
+          dispatch({
+            type: 'message/edited',
+            conversationId: readString(event.payload, 'conversation_id'),
+            id: readString(event.payload, 'id'),
+            content: readString(event.payload, 'content'),
+            editedAt: readString(event.payload, 'edited_at'),
+          });
+
+          scheduleConversationsRefresh();
+
+          return;
+        }
+
         if (event.type === 'receipt.updated') {
           dispatchReceipts({
             type: 'receipt/updated',
@@ -610,6 +644,7 @@ export function useAppState(me: Me): AppState {
     refreshConversations,
     send,
     deleteMessage,
+    editMessage,
     createDirect,
     createGroup,
   };

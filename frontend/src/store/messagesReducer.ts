@@ -36,7 +36,14 @@ export type MessagesAction =
   | { type: 'message/acknowledged'; conversationId: string; clientMessageId: string; serverId: string }
   | { type: 'message/failed'; conversationId: string; clientMessageId: string }
   | { type: 'message/received'; message: StoredMessage }
-  | { type: 'message/deleted'; conversationId: string; id: string; deletedAt: string };
+  | { type: 'message/deleted'; conversationId: string; id: string; deletedAt: string }
+  | {
+      type: 'message/edited';
+      conversationId: string;
+      id: string;
+      content: string;
+      editedAt: string;
+    };
 
 const EMPTY_THREAD: Thread = { items: [], nextBefore: null, loaded: false };
 
@@ -136,6 +143,19 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
         items: thread.items.map((item) =>
           item.id === action.id
             ? { ...item, content: null, deletedAt: action.deletedAt }
+            : item,
+        ),
+      }));
+
+    case 'message/edited':
+      // Meme motif que `message/deleted` : reconciliation par `id` SERVEUR,
+      // et un `id` absent du fil est ignore silencieusement (le message n'a
+      // jamais ete charge dans ce thread).
+      return patchThread(state, action.conversationId, (thread) => ({
+        ...thread,
+        items: thread.items.map((item) =>
+          item.id === action.id
+            ? { ...item, content: action.content, editedAt: action.editedAt }
             : item,
         ),
       }));
