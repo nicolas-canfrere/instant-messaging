@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import type { UserSummary } from '../api/types';
 import type { StoredMessage, Thread } from '../store/messagesReducer';
 import { emptyReceiptsState } from '../store/receiptsReducer';
-import { deletedMessageLabel } from './labels';
-import { MessageList } from './MessageList';
+import { formatRelative } from './dates';
+import { deletedMessageLabel, editedMessageLabel, EDIT_WINDOW_MS } from './labels';
+import { EDIT_CLOCK_TICK_MS, MessageList } from './MessageList';
 
 /**
  * Ce fichier ne teste PAS le balisage : il teste les CONDITIONS d'affichage.
@@ -107,16 +108,81 @@ describe('MessageList', () => {
    * Le temps relatif est offert au survol de l'heure. Le test verrouille le
    * cablage, pas le libelle (`dates.test.ts` s'en charge) : une fonction
    * correcte que personne n'appelle a l'air livree sans l'etre.
+   *
+   * L'assertion compare a ce que `formatRelative` produit pour cet instant, et
+   * non a « different de la chaine vide » : `getAttribute` rend `null` quand
+   * l'attribut est ABSENT, et `null !== ''` — retirer le `title` du composant
+   * laissait donc le test vert.
    */
   it('offre le temps relatif au survol de l heure', () => {
-    const { container } = renderList(
-      threadOf(message({ createdAt: '2026-07-26T12:00:00+00:00' })),
-    );
+    const createdAt = '2026-07-26T12:00:00+00:00';
+    const { container } = renderList(threadOf(message({ createdAt })));
 
     const time = container.querySelector('time');
 
-    expect(time?.getAttribute('dateTime')).toBe('2026-07-26T12:00:00+00:00');
-    expect(time?.getAttribute('title')).not.toBe('');
+    expect(time?.getAttribute('dateTime')).toBe(createdAt);
+
+    const title = time?.getAttribute('title');
+    expect(typeof title).toBe('string');
+    expect(title).not.toBe('');
+    expect(title).toBe(formatRelative(createdAt, new Date(), navigator.language));
+  });
+
+  /**
+   * `deleteForEveryone()` conserve volontairement `edited_at` : un message edite
+   * puis supprime a donc les deux marques. La mention ne doit apparaitre que sur
+   * un message VIVANT — sinon l'interface affiche « Alice · 14:32 · modifie »
+   * au-dessus de « Ce message a ete supprime ».
+   */
+  it("n'affiche pas la mention « modifie » au-dessus d'un tombstone", () => {
+    renderList(
+      threadOf(
+        message({
+          content: null,
+          editedAt: '2026-07-26T12:05:00+00:00',
+          deletedAt: '2026-07-26T12:10:00+00:00',
+        }),
+      ),
+    );
+
+    expect(screen.getByText(deletedMessageLabel)).toBeDefined();
+    expect(screen.queryByText(new RegExp(editedMessageLabel))).toBeNull();
+  });
+
+  /** Le pendant : sur un message vivant, la mention est bien la. */
+  it('affiche la mention « modifie » sur un message vivant', () => {
+    renderList(threadOf(message({ editedAt: '2026-07-26T12:05:00+00:00' })));
+
+    expect(screen.getByText(new RegExp(editedMessageLabel))).toBeDefined();
+  });
+
+  /**
+   * `canStillEdit` n'etait evalue qu'au rendu, et le menu est revele par
+   * `group-hover` — du CSS, pas du React. Survoler ne re-rend pas : l'entree
+   * « Modifier » restait donc offerte bien au-dela de la 15e minute, et le clic
+   * partait en 403. Une horloge de composant fait avancer l'echeance.
+   */
+  it("retire « Modifier » quand la fenetre se ferme, sans nouvelle donnee", () => {
+    vi.useFakeTimers();
+
+    try {
+      // Une seconde avant la fermeture : l'action est encore offerte au rendu.
+      const createdAt = new Date(Date.now() - (EDIT_WINDOW_MS - 1_000)).toISOString();
+      renderList(threadOf(message({ createdAt })));
+
+      expect(screen.getByLabelText('Modifier le message')).toBeDefined();
+
+      // Rien n'arrive du serveur : seul le temps passe.
+      act(() => {
+        vi.advanceTimersByTime(2 * EDIT_CLOCK_TICK_MS);
+      });
+
+      expect(screen.queryByLabelText('Modifier le message')).toBeNull();
+      // La suppression, elle, n'a pas de fenetre : elle reste offerte.
+      expect(screen.getByLabelText('Supprimer le message')).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /** Le menu ne s'affiche que sur SES messages : rien a editer chez les autres. */

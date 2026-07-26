@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState, type UIEvent } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type UIEvent } from 'react';
 import type { UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
 import {
@@ -24,6 +24,16 @@ const LOAD_OLDER_THRESHOLD_PX = 100;
 
 /** Marge de tolerance pour considerer que l'utilisateur regarde bien le bas du fil. */
 const AT_BOTTOM_TOLERANCE_PX = 40;
+
+/**
+ * Periode du reveil de l'horloge du composant.
+ *
+ * Trente secondes, et c'est deliberement grossier : cette horloge n'a que deux
+ * consommateurs, la fenetre d'edition (quinze minutes) et les separateurs de
+ * jour. Trente secondes d'imprecision n'y sont pas perceptibles, alors qu'un tic
+ * d'une seconde re-rendrait toute la liste trente fois plus souvent pour rien.
+ */
+export const EDIT_CLOCK_TICK_MS = 30_000;
 
 type Props = {
   thread: Thread;
@@ -65,7 +75,30 @@ export function MessageList({
   // Intl ne sont pas gratuits, et la valeur ne change pas en cours de session.
   const timeZone = viewerTimeZone();
   const locale = viewerLocale();
-  const now = new Date();
+
+  /**
+   * UNE SEULE horloge pour tout le composant, et elle avance.
+   *
+   * Deux choses en dependent : les separateurs de jour (« Aujourd'hui » devient
+   * « Hier » a minuit) et la fenetre d'edition de quinze minutes. Aucune des
+   * deux ne peut compter sur un nouveau rendu au bon moment — le menu d'action
+   * est revele par `group-hover`, donc par du CSS et non par React : survoler ne
+   * re-rend rien, et l'entree « Modifier » restait offerte bien apres la
+   * fermeture de la fenetre, le clic partant alors en 403.
+   *
+   * D'ou ce tic, sur le meme motif que `TypingIndicator`. Il ne fait varier ni
+   * la longueur de la liste ni l'identite de son premier element : ni l'effet de
+   * suivi du bas du fil ni `useScrollAnchor` ne se redeclenchent, la position de
+   * lecture ne bouge donc pas.
+   */
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const now = new Date(nowMs);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), EDIT_CLOCK_TICK_MS);
+
+    return () => clearInterval(timer);
+  }, []);
 
   // Corrige le saut de scroll provoque par l'insertion d'une page plus ancienne
   // EN TETE de la liste. Doit etre appele avant l'effet de suivi ci-dessous :
@@ -174,7 +207,16 @@ export function MessageList({
                   >
                     {formatTime(message.createdAt, timeZone, locale)}
                   </time>
-                  {message.editedAt !== null && ` · ${editedMessageLabel}`}
+                  {/*
+                    Uniquement sur un message VIVANT : `deleteForEveryone()`
+                    conserve volontairement `edited_at`, un message edite puis
+                    supprime porte donc les deux marques. Sans cette garde,
+                    l'interface affiche « Alice · 14:32 · modifie » juste
+                    au-dessus de « Ce message a ete supprime ».
+                  */}
+                  {message.deletedAt === null &&
+                    message.editedAt !== null &&
+                    ` · ${editedMessageLabel}`}
                 </p>
                 {message.deletedAt !== null ? (
                   <p className="italic opacity-60">{deletedMessageLabel}</p>
@@ -198,7 +240,9 @@ export function MessageList({
                 {message.senderId === meId && messageId !== null && message.deletedAt === null && (
                   <MessageActions
                     onEdit={
-                      canStillEdit(message.createdAt, Date.now())
+                      // `nowMs`, et non `Date.now()` : c'est l'horloge du
+                      // composant, celle qui avance et provoque le re-rendu.
+                      canStillEdit(message.createdAt, nowMs)
                         ? () => setEditingId(messageId)
                         : null
                     }
