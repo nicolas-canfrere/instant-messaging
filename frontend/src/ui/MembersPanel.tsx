@@ -64,6 +64,15 @@ export function MembersPanel({ conversationId, users, meId, onLeave, onClose }: 
     (member) => member.user_id === meId && member.role === 'member',
   );
 
+  // Miroir exact de la regle ci-dessus : seul un admin modifie la composition
+  // du groupe, le serveur repond 403 aux autres — et le voter le journalise en
+  // `warning`, precisement pour signaler une interface qui propose une action
+  // interdite. Meme prudence sur la liste non chargee : on n'affiche rien tant
+  // qu'on ignore son propre role.
+  const canAddMembers = (members ?? []).some(
+    (member) => member.user_id === meId && member.role === 'admin',
+  );
+
   async function leave() {
     if (!window.confirm('Quitter ce groupe ? Vous ne le verrez plus.')) return;
 
@@ -135,7 +144,7 @@ export function MembersPanel({ conversationId, users, meId, onLeave, onClose }: 
         </ul>
       )}
 
-      {candidates.length > 0 && (
+      {canAddMembers && candidates.length > 0 && (
         <>
           <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ajouter</h4>
 

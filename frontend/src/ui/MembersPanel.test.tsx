@@ -10,8 +10,15 @@ vi.mock('../api/client', () => ({
 
 const ALICE: UserSummary = { id: 'user-alice', username: 'alice', display_name: 'Alice' };
 const BOB: UserSummary = { id: 'user-bob', username: 'bob', display_name: 'Bob' };
+// Carol n'est PAS dans le groupe : sans elle, la liste des candidats a l'ajout
+// serait vide et les tests sur le bloc « Ajouter » passeraient sans rien prouver.
+const CAROL: UserSummary = { id: 'user-carol', username: 'carol', display_name: 'Carol' };
 
-const USERS: Record<string, UserSummary> = { [ALICE.id]: ALICE, [BOB.id]: BOB };
+const USERS: Record<string, UserSummary> = {
+  [ALICE.id]: ALICE,
+  [BOB.id]: BOB,
+  [CAROL.id]: CAROL,
+};
 
 /**
  * Alice administre, Bob est simple membre. Le type de retour est annote : sans
@@ -47,6 +54,7 @@ function renderPanel(meId: string, onLeave = vi.fn()) {
 }
 
 const LEAVE = { name: 'Quitter le groupe' };
+const ADD = { name: 'Ajouter au groupe' };
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -69,6 +77,27 @@ describe('MembersPanel', () => {
 
     await waitFor(() => expect(screen.getByText('Bob')).toBeDefined());
     expect(screen.queryByRole('button', LEAVE)).toBeNull();
+  });
+
+  it('propose d’ajouter des membres a un admin', async () => {
+    renderPanel(ALICE.id);
+
+    await waitFor(() => expect(screen.getByRole('button', ADD)).toBeDefined());
+  });
+
+  /**
+   * Le serveur repond 403 a un simple membre qui tente un ajout, et le voter le
+   * journalise en `warning` — precisement pour signaler une interface qui
+   * propose une action interdite. C'est le miroir du bouton de depart, masque
+   * a l'admin : on ne propose jamais ce qu'on sait refuse.
+   */
+  it('ne propose pas d’ajouter des membres a un simple membre', async () => {
+    renderPanel(BOB.id);
+
+    await waitFor(() => expect(screen.getByText('Alice')).toBeDefined());
+    expect(screen.queryByRole('button', ADD)).toBeNull();
+    // Ni le bouton, ni les cases a cocher qui l'alimentent.
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 
   it('ne quitte rien si la confirmation est refusee', async () => {
