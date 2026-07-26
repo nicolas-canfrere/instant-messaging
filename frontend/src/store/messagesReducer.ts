@@ -42,7 +42,12 @@ export type MessagesAction =
       conversationId: string;
       id: string;
       content: string;
-      editedAt: string;
+      // Nullable, parce que le serveur peut legitimement le renvoyer nul : une
+      // edition qui ne change rien est un no-op cote agregat, `edited_at` reste
+      // donc `null` en base. Un type `string` obligeait l'appelant a inventer
+      // une chaine vide, que `MessageList` lisait comme « modifie » puisqu'elle
+      // n'est pas `null`. Le type doit pouvoir dire ce que le serveur dit.
+      editedAt: string | null;
     };
 
 const EMPTY_THREAD: Thread = { items: [], nextBefore: null, loaded: false };

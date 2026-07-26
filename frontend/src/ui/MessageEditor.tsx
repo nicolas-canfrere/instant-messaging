@@ -26,7 +26,19 @@ export function MessageEditor({ initialContent, onSubmit, onCancel }: Props) {
       event.preventDefault();
 
       const trimmed = draft.trim();
-      if (trimmed !== '') onSubmit(trimmed);
+      if (trimmed === '') return;
+
+      // Rien n'a change : refermer suffit. Ce n'est pas une economie de requete
+      // — le serveur traite ce cas en no-op — mais le no-op renvoie
+      // `edited_at: null`, et c'est par ce chemin qu'un message jamais modifie
+      // se retrouvait affuble de la mention « modifie ».
+      if (trimmed === initialContent.trim()) {
+        onCancel();
+
+        return;
+      }
+
+      onSubmit(trimmed);
     }
   }
 

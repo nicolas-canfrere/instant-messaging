@@ -320,6 +320,30 @@ describe('message/edited', () => {
     expect(item.editedAt).toBe('2026-07-26T09:05:00+00:00');
   });
 
+  /**
+   * Le serveur dit la verite, le front la transporte telle quelle. Un `PATCH`
+   * sans modification est un no-op cote agregat : la vue revient avec
+   * `edited_at: null`, et ce `null` doit arriver intact jusqu'au message. Le
+   * reduire a la chaine vide afficherait « · modifie » sur un message jamais
+   * modifie, `MessageList` testant `editedAt !== null`.
+   */
+  it('transporte un editedAt nul sans le transformer en chaine vide', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'bonjour' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/edited',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      content: 'bonjour',
+      editedAt: null,
+    });
+
+    expect(at(selectThread(next, 'c1').items, 0).editedAt).toBeNull();
+  });
+
   it('ignore un identifiant absent du fil', () => {
     const state = messagesReducer(emptyMessagesState(), {
       type: 'message/received',

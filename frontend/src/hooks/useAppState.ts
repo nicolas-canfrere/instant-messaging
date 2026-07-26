@@ -334,15 +334,25 @@ export function useAppState(me: Me): AppState {
     async (conversationId: string, messageId: string, content: string) => {
       const updated = await api.editMessage(conversationId, messageId, content);
 
+      // Un message edite a toujours une charge utile : editer un tombstone est
+      // refuse en 409. Un `content` nul ici voudrait dire que la reponse ne dit
+      // pas ce qu'on croit — on ne l'applique alors pas, plutot que d'inventer
+      // une chaine vide qui effacerait le message a l'ecran.
+      if (updated.content === null) return;
+
       // La reponse porte le meme etat final que l'echo SSE : l'appliquer ici
       // aussi rend l'edition visible meme si le hub est injoignable, et
       // l'operation est idempotente donc le doublon est sans consequence.
+      //
+      // `edited_at` est transporte TEL QUEL, y compris nul : le serveur est
+      // l'autorite sur « ce message a-t-il ete modifie ». Le reduire a une
+      // chaine vide affichait « · modifie » sur un message jamais modifie.
       dispatch({
         type: 'message/edited',
         conversationId,
         id: messageId,
-        content: updated.content ?? '',
-        editedAt: updated.edited_at ?? '',
+        content: updated.content,
+        editedAt: updated.edited_at,
       });
     },
     [],
@@ -542,7 +552,10 @@ export function useAppState(me: Me): AppState {
             conversationId: readString(event.payload, 'conversation_id'),
             id: readString(event.payload, 'id'),
             content: readString(event.payload, 'content'),
-            editedAt: readString(event.payload, 'edited_at'),
+            // Meme fidelite que sur la reponse du `PATCH` : un `edited_at`
+            // absent reste `null` plutot que de devenir une chaine vide, que
+            // `MessageList` lirait comme « ce message a ete modifie ».
+            editedAt: readNullableString(event.payload, 'edited_at'),
           });
 
           scheduleConversationsRefresh();
