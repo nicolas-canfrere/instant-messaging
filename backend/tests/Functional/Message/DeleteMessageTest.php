@@ -155,4 +155,53 @@ final class DeleteMessageTest extends DatabaseTestCase
 
         self::assertResponseStatusCodeSame(401);
     }
+
+    public function testDeletingTheLastMessageClearsThePreview(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $messageId = $this->send($conversationId, self::CLIENT_ID, 'dernier');
+
+        $this->client->request('DELETE', sprintf('/api/conversations/%s/messages/%s', $conversationId, $messageId));
+
+        self::assertNull(
+            $this->previewOf($conversationId),
+            'Laisser l\'apercu rendrait « payload hard » faux.',
+        );
+    }
+
+    /** La garde du WHERE : seul le message qui EST le pointeur touche l'apercu. */
+    public function testDeletingAnOlderMessageLeavesThePreviewAlone(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+
+        $olderId = $this->send($conversationId, '01J9ZQ7X8K3M4N5P6Q7R8S9TC2', 'ancien');
+        $this->send($conversationId, '01J9ZQ7X8K3M4N5P6Q7R8S9TC3', 'recent');
+
+        $this->client->request('DELETE', sprintf('/api/conversations/%s/messages/%s', $conversationId, $olderId));
+
+        self::assertSame('recent', $this->previewOf($conversationId));
+    }
+
+    private function previewOf(string $conversationId): ?string
+    {
+        $this->client->request('GET', '/api/conversations');
+
+        /** @var list<array{id: string, last_message_preview: string|null}> $conversations */
+        $conversations = json_decode(
+            (string) $this->client->getResponse()->getContent(),
+            true,
+            512,
+            \JSON_THROW_ON_ERROR,
+        );
+
+        foreach ($conversations as $conversation) {
+            if ($conversation['id'] === $conversationId) {
+                return $conversation['last_message_preview'];
+            }
+        }
+
+        self::fail('Conversation absente de la liste.');
+    }
 }
