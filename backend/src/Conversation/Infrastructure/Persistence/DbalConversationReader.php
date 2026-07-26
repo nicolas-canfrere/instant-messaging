@@ -8,6 +8,7 @@ use App\Conversation\Application\Query\ConversationDetailView;
 use App\Conversation\Application\Query\ConversationReaderInterface;
 use App\Conversation\Application\Query\ConversationView;
 use App\Conversation\Domain\DirectKey;
+use App\Conversation\Domain\Port\UnreadCounterPortInterface;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
 use App\Shared\Infrastructure\Persistence\DatabaseTimestamp;
@@ -16,13 +17,15 @@ use Doctrine\DBAL\Connection;
 /** Cote lecture : SQL direct vers un DTO, sans passer par le domaine. */
 final readonly class DbalConversationReader implements ConversationReaderInterface
 {
-    public function __construct(private Connection $connection)
-    {
+    public function __construct(
+        private Connection $connection,
+        private UnreadCounterPortInterface $unread,
+    ) {
     }
 
     public function forMember(UserId $userId): array
     {
-        /** @var list<array{id: string, type: string, title: string|null, last_message_at: string|null, last_message_preview: string|null, last_message_sender_id: string|null}> $rows */
+        /** @var list<array{id: string, type: string, title: string|null, last_message_at: string|null, last_message_preview: string|null, last_message_sender_id: string|null, last_read_message_id: string|null}> $rows */
         $rows = $this->connection->fetchAllAssociative(
             // Aucune jointure vers `messages` : l'apercu est denormalise sur la
             // conversation, ecrit par le listener qui reagira a MessageWasSent.
@@ -34,7 +37,8 @@ final readonly class DbalConversationReader implements ConversationReaderInterfa
                        c.title,
                        c.last_message_at,
                        c.last_message_preview,
-                       c.last_message_sender_id
+                       c.last_message_sender_id,
+                       cm.last_read_message_id
                 FROM conversations c
                 INNER JOIN conversation_members cm
                         ON cm.conversation_id = c.id AND cm.user_id = :user_id
@@ -42,6 +46,15 @@ final readonly class DbalConversationReader implements ConversationReaderInterfa
                 SQL,
             ['user_id' => $userId->toString()],
         );
+
+        $watermarks = [];
+        foreach ($rows as $row) {
+            $watermarks[$row['id']] = $row['last_read_message_id'];
+        }
+
+        // UNE requete pour toutes les conversations : le contrat est batche
+        // precisement pour que l'ecran d'accueil ne produise pas N requetes.
+        $unreadCounts = $this->unread->countUnread($userId, $watermarks);
 
         return array_map(
             static fn(array $row): ConversationView => new ConversationView(
@@ -51,6 +64,7 @@ final readonly class DbalConversationReader implements ConversationReaderInterfa
                 DatabaseTimestamp::toAtom($row['last_message_at']),
                 $row['last_message_preview'],
                 $row['last_message_sender_id'],
+                $unreadCounts[$row['id']] ?? 0,
             ),
             $rows,
         );
@@ -80,10 +94,10 @@ final readonly class DbalConversationReader implements ConversationReaderInterfa
             return null;
         }
 
-        /** @var list<array{user_id: string, role: string}> $members */
+        /** @var list<array{user_id: string, role: string, last_delivered_message_id: string|null, last_read_message_id: string|null}> $members */
         $members = $this->connection->fetchAllAssociative(
             <<<'SQL'
-                SELECT user_id, role
+                SELECT user_id, role, last_delivered_message_id, last_read_message_id
                 FROM conversation_members
                 WHERE conversation_id = :conversation_id
                 ORDER BY joined_at ASC

@@ -18,10 +18,11 @@ final readonly class ConversationView
         public ?string $lastMessageAt,
         public ?string $lastMessagePreview,
         public ?string $lastMessageSenderId,
+        public int $unreadCount = 0,
     ) {
     }
 
-    /** @return array<string, string|null> */
+    /** @return array<string, string|int|null> */
     public function toArray(): array
     {
         return [
@@ -31,6 +32,7 @@ final readonly class ConversationView
             'last_message_at' => $this->lastMessageAt,
             'last_message_preview' => $this->lastMessagePreview,
             'last_message_sender_id' => $this->lastMessageSenderId,
+            'unread_count' => $this->unreadCount,
         ];
     }
 }

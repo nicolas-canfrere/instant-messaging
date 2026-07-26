@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import type { ConversationSummary, UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
+import type { ReceiptsState } from '../store/receiptsReducer';
+import type { TypingState } from '../store/typingReducer';
 import { Composer } from './Composer';
 import { conversationTitle } from './labels';
 import { MembersPanel } from './MembersPanel';
 import { MessageList } from './MessageList';
+import { TypingIndicator } from './TypingIndicator';
 
 type Props = {
   conversation: ConversationSummary;
@@ -12,8 +15,11 @@ type Props = {
   users: Record<string, UserSummary>;
   peers: Record<string, string>;
   meId: string;
+  typingState: TypingState;
+  receiptsState: ReceiptsState;
   onLoadOlder: () => void;
   onSend: (content: string) => Promise<void>;
+  onTyping: () => void;
 };
 
 export function ConversationView({
@@ -22,8 +28,11 @@ export function ConversationView({
   users,
   peers,
   meId,
+  typingState,
+  receiptsState,
   onLoadOlder,
   onSend,
+  onTyping,
 }: Props) {
   // Etat purement local d'affichage : personne d'autre n'a besoin de savoir si
   // le panneau des membres est ouvert. Il vit donc ici, pas dans `useAppState`.
@@ -71,6 +80,9 @@ export function ConversationView({
           thread={thread}
           users={users}
           meId={meId}
+          conversationId={conversation.id}
+          receiptsState={receiptsState}
+          isGroup={conversation.type === 'group'}
           onLoadOlder={onLoadOlder}
         />
 
@@ -82,7 +94,17 @@ export function ConversationView({
           Prefixe different de celui du MessageList ci-dessus : voir l'explication
           la-bas. Deux freres ne peuvent pas porter la meme `key`.
         */}
-        <Composer key={`composer-${conversation.id}`} onSend={onSend} />
+        {/*
+          Entre le fil et la saisie, comme dans toutes les messageries : la ligne
+          apparait et disparait sans jamais deplacer le champ de saisie.
+        */}
+        <TypingIndicator
+          typingState={typingState}
+          conversationId={conversation.id}
+          users={users}
+        />
+
+        <Composer key={`composer-${conversation.id}`} onSend={onSend} onTyping={onTyping} />
       </section>
 
       {conversation.type === 'group' && showMembers && (

@@ -23,15 +23,30 @@ services:
       MERCURE_PUBLIC_URL: "http://localhost:8080/.well-known/mercure"
       # Valeur fixe : les tests qui vérifient un JWT doivent être déterministes.
       MERCURE_JWT_SECRET: "secret-de-test-de-32-caracteres-minimum"
+      REDIS_HOST: "redis-test"
+      REDIS_PORT: "6379"
     volumes:
       - ./backend:/app
     depends_on:
       postgres-test:
         condition: service_healthy
+      redis-test:
+        condition: service_healthy
     # L'image démarre FrankenPHP par défaut. Ici le conteneur n'est qu'un
     # runtime pour `docker compose run` : rien à servir.
     entrypoint: []
     command: ["sleep", "infinity"]
+
+  # Les tests fonctionnels exercent le VRAI adaptateur Redis, comme ils exercent
+  # le vrai PostgreSQL. Un double en memoire ne verifierait pas ce qui casse en
+  # pratique : le TTL et le format des cles.
+  redis-test:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
 
   postgres-test:
     image: postgres:17-alpine

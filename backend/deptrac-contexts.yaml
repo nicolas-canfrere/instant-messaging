@@ -22,8 +22,19 @@ deptrac:
 
         - name: Identity
           collectors: [{ type: directory, value: 'src/Identity/.*' }]
+
+        # Surface publiee de Message, symetrique de celle de Conversation.
+        - name: MessageContract
+          collectors: [{ type: directory, value: 'src/Message/Application/Contract/.*' }]
+
         - name: Message
-          collectors: [{ type: directory, value: 'src/Message/.*' }]
+          collectors:
+              - type: bool
+                must:
+                    - { type: directory, value: 'src/Message/.*' }
+                must_not:
+                    - { type: directory, value: 'src/Message/Application/Contract/.*' }
+
         - name: Realtime
           collectors: [{ type: directory, value: 'src/Realtime/.*' }]
 
@@ -44,15 +55,21 @@ deptrac:
         # et de scalaires (ADR 0001). Sans Shared ici, aucun contrat ne pourrait
         # nommer ce qu'il rend.
         ConversationContract: [Shared]
+        MessageContract: [Shared]
 
         Identity: [Shared, Vendor]
         # Conversation depend de son PROPRE contrat : le producteur possede sa
-        # surface publiee, donc il l'implemente.
-        Conversation: [Shared, ConversationContract, Vendor]
+        # surface publiee, donc il l'implemente. Il consulte aussi celui de
+        # Message pour compter les non-lus (tranche 2).
+        #
+        # Les deux contextes se consultent donc mutuellement, et ce n'est PAS un
+        # cycle : les couches `*Contract` ne dependent que de Shared, jamais de
+        # leur propre contexte. Le graphe reste acyclique.
+        Conversation: [Shared, ConversationContract, MessageContract, Vendor]
         # Message demande a Conversation si l'expediteur a acces au fil. Cette
         # ligne est la friction voulue : elargir l'allowlist doit etre un geste
         # delibere, et ce couplage vise une surface publiee, pas des internes.
-        Message: [Shared, ConversationContract, Vendor]
+        Message: [Shared, ConversationContract, MessageContract, Vendor]
 
         # Allowlist explicite : ajouter un couplage inter-contextes demande de
         # modifier cette ligne. La friction est voulue.

@@ -9,6 +9,7 @@ export type ConversationSummary = {
   last_message_at: string | null;
   last_message_preview: string | null;
   last_message_sender_id: string | null;
+  unread_count: number;
 };
 
 export type ConversationMember = { user_id: string; role: string };
@@ -37,3 +38,5 @@ export type ApiMessage = {
 export type MessagePageResponse = { items: ApiMessage[]; next_before: string | null };
 
 export type RealtimeToken = { hub_url: string; topics: string[] };
+
+export type HeartbeatResponse = { online_user_ids: string[] };

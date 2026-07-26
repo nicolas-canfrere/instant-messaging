@@ -56,13 +56,16 @@ services:
     App\Shared\Application\Event\DomainEventCollectorInterface: '@App\Shared\Infrastructure\Event\InMemoryDomainEventCollector'
     App\Identity\Domain\UserRepositoryInterface: '@App\Identity\Infrastructure\Persistence\DbalUserRepository'
     App\Realtime\Domain\EventPublisherInterface: '@App\Realtime\Infrastructure\Mercure\MercureEventPublisher'
+    App\Realtime\Domain\PresenceStoreInterface: '@App\Realtime\Infrastructure\Presence\RedisPresenceStore'
     App\Conversation\Domain\ConversationRepositoryInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationRepository'
+    App\Conversation\Domain\MembershipRepositoryInterface: '@App\Conversation\Infrastructure\Persistence\DbalMembershipRepository'
     App\Conversation\Application\Query\ConversationReaderInterface: '@App\Conversation\Infrastructure\Persistence\DbalConversationReader'
     App\Conversation\Application\MembershipCheckerInterface: '@App\Conversation\Infrastructure\Persistence\DbalMembershipChecker'
     App\Conversation\Application\LastMessagePointerWriterInterface: '@App\Conversation\Infrastructure\Persistence\DbalLastMessagePointerWriter'
     App\Message\Domain\MessageRepositoryInterface: '@App\Message\Infrastructure\Persistence\DbalMessageRepository'
     App\Message\Application\Query\MessageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessageReader'
     App\Message\Application\Query\MessagePageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessagePageReader'
+    App\Conversation\Domain\Port\UnreadCounterPortInterface: '@App\Conversation\Infrastructure\Contract\UnreadCounterAdapter'
     App\Shared\Application\Bus\CommandDispatcherInterface: '@App\Shared\Infrastructure\Bus\CommandDispatcher'
 
     # Le meme convertisseur que celui du serialiseur, pour que les chemins de
@@ -81,6 +84,12 @@ services:
     # inter-contextes du projet, et il vise une surface publiee (cf. ADR 0001).
     App\Conversation\Application\Contract\MemberConversationsFinderInterface: '@App\Conversation\Infrastructure\Contract\DbalMemberConversationsFinder'
     App\Conversation\Application\Contract\ConversationMembershipInterface: '@App\Conversation\Infrastructure\Contract\DbalConversationMembership'
+    App\Conversation\Application\Contract\ConversationPeersFinderInterface: '@App\Conversation\Infrastructure\Contract\DbalConversationPeersFinder'
+
+    # Contrat publie par Message, consomme par Conversation pour le compteur de
+    # non-lus : le couplage est reciproque, mais chaque sens vise une surface
+    # publiee et aucune couche `*Contract` ne depend d'un contexte.
+    App\Message\Application\Contract\UnreadCounterInterface: '@App\Message\Infrastructure\Contract\DbalUnreadCounter'
 
     # L'URL que le NAVIGATEUR ouvre, donc celle qui passe par l'origine unique —
     # pas l'URL interne par laquelle le backend publie.
@@ -97,3 +106,13 @@ services:
     Symfony\Component\Messenger\MessageBusInterface $commandBus: '@command.bus'
     Symfony\Component\Messenger\MessageBusInterface $queryBus: '@query.bus'
     Symfony\Component\Messenger\MessageBusInterface $eventBus: '@event.bus'
+
+    # `\Redis` est une classe d'extension, sans service par defaut : on la
+    # construit ici. `connect()` est paresseux du point de vue de Symfony — le
+    # service n'est instancie que si quelqu'un l'injecte.
+    # `class` explicite : un id sans backslash n'est pas reconnu comme un FQCN,
+    # Symfony n'en deduit donc aucune classe.
+    Redis:
+        class: Redis
+        calls:
+            - connect: ['%env(string:REDIS_HOST)%', '%env(int:REDIS_PORT)%']

@@ -62,6 +62,10 @@ function Workspace({ me }: { me: Me }) {
     conversations,
     selectedId,
     messagesState,
+    onlineUserIds,
+    typingState,
+    receiptsState,
+    notifyTyping,
     selectConversation,
     loadOlder,
     send,
@@ -81,6 +85,7 @@ function Workspace({ me }: { me: Me }) {
         conversations={conversations}
         users={users}
         peers={peers}
+        onlineUserIds={onlineUserIds}
         selectedId={selectedId}
         onSelect={selectConversation}
         onNewConversation={() => setCreating(true)}
@@ -97,8 +102,11 @@ function Workspace({ me }: { me: Me }) {
           users={users}
           peers={peers}
           meId={me.id}
+          typingState={typingState}
+          receiptsState={receiptsState}
           onLoadOlder={loadOlder}
           onSend={(content) => send(selected.id, content)}
+          onTyping={() => notifyTyping(selected.id)}
         />
       )}
 

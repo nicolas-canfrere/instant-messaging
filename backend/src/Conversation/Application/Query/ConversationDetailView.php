@@ -7,7 +7,7 @@ namespace App\Conversation\Application\Query;
 /** DTO de lecture. Modifier cette forme est un changement cassant pour le front. */
 final readonly class ConversationDetailView
 {
-    /** @param list<array{user_id: string, role: string}> $members */
+    /** @param list<array{user_id: string, role: string, last_delivered_message_id: string|null, last_read_message_id: string|null}> $members */
     public function __construct(
         public string $id,
         public string $type,

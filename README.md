@@ -47,6 +47,15 @@ are welcome, portability is not a goal.
 **404, not 403** — a 403 would confirm that the conversation exists, handing out an
 enumeration oracle.
 
+**Durable state and ephemeral state are told apart, and stored differently.** Read receipts
+are durable: two watermark columns on `conversation_members`, moved forward by a guarded
+`UPDATE` whose `WHERE` makes monotonicity structural — a cursor can never go backwards, not
+even under two concurrent tabs. Presence and typing are ephemeral: a Redis key with a TTL for
+one, a bare Mercure event for the other, and **not a single database row for either**. The
+migration that ships slice 2 adds two columns and nothing else — that absence is the argument.
+A persisted `is_online` boolean turns false on the first crash and is never reset; an
+expiring key is self-healing by construction.
+
 **Frontend logic lives outside React.** Deduplication, optimistic reconciliation and ULID
 ordering are a pure reducer, testable by calling a function. The `EventSource` has exactly one
 owner. Components are kept as dumb as possible.
@@ -67,6 +76,7 @@ flowchart LR
     Backend["backend<br/>FrankenPHP, worker mode off"]
     Mercure["mercure<br/>hub, separate on purpose"]
     Postgres[("postgres")]
+    Redis[("redis<br/>presence only, no volume")]
 
     Browser -->|"HTTP"| Caddy
     Caddy -->|"/api/*"| Backend
@@ -74,8 +84,14 @@ flowchart LR
     Caddy -->|"everything else"| Vite["frontend<br/>Vite dev server"]
     Backend -->|"publish, after commit"| Mercure
     Backend --> Postgres
+    Backend -->|"SETEX / MGET, 30 s TTL"| Redis
     Mercure -.->|"SSE"| Browser
 ```
+
+The sixth container, `redis`, holds **no durable data** and has **no volume, deliberately**.
+Presence that survived a restart would claim people are online when nobody knows that any
+more; Redis comes back empty, and each client's next heartbeat rebuilds the whole picture in
+under 20 seconds.
 
 A message travels like this: the browser `POST`s it, the command handler persists it and
 records a domain event, the transactional middleware dispatches that event **after the commit**
@@ -109,6 +125,8 @@ frontend/src/
 - Docker, with the Compose plugin
 - GNU Make
 - `openssl` (used once, to generate the Mercure secret)
+
+The backend image builds `ext-redis` in (see `backend/Dockerfile`); nothing to install by hand.
 
 **Neither PHP nor Node.js is needed on your machine.** They exist only inside the containers.
 Every command in this README runs through `make` or `docker compose`.
@@ -185,12 +203,13 @@ make front-test             # Vitest
 
 ## Roadmap
 
-The project is cut into five slices, each with its own spec and plan. **Slice 1 is in
-progress**; nothing outside it is implemented yet.
+The project is cut into five slices, each with its own spec and plan. **Slices 1 and 2 are
+delivered**; nothing outside them is implemented yet.
 
-1. **Real-time core and conversations** — send, receive, list, paginate *(in progress)*
-2. Read receipts and presence
-3. Editing and deletion
+1. **Real-time core and conversations** — send, receive, list, paginate *(delivered)*
+2. **Read receipts and presence** — watermarks, typing indicator, online dot, unread badge
+   *(delivered)*
+3. Editing and deletion *(next)*
 4. Media
 5. Search and moderation
 
@@ -202,5 +221,6 @@ progress**; nothing outside it is implemented yet.
 | ---------------------------- | ------------------------------------------------------------- |
 | `docs/adr/`                  | Cross-cutting decisions. They outlive slices and win over specs |
 | `docs/superpowers/specs/`    | One spec per slice, including the alternatives rejected and why |
+| [Slice 2 design](docs/superpowers/specs/2026-07-25-instant-messaging-tranche-2-design.md) | Why receipts are durable and presence is not |
 | `docs/superpowers/plans/`    | Implementation plans, one story per branch                      |
 | `CLAUDE.md`                  | The conventions this codebase is held to                        |
