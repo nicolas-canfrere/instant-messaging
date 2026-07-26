@@ -52,6 +52,22 @@ final class Version20260726144434 extends AbstractMigration
             WHERE status IN ('pending', 'processing')
             SQL);
 
+        $this->comment('TABLE media_objects', "Objets televerses (images). Possedee par le contexte Media, qui ignore l'existence de Conversation et Message : un media existe independamment de tout rattachement (spec §1.1).");
+        $this->comment('COLUMN media_objects.id', 'ULID.');
+        $this->comment('COLUMN media_objects.owner_id', "Utilisateur qui a demande le televersement. C'est lui, et lui seul, qui pourra rattacher ce media a un message.");
+        $this->comment('COLUMN media_objects.storage_key', "Cle de l'objet original dans le bucket, fabriquee par StorageKey::forOriginal(). Unique : deux medias ne pointent jamais vers le meme objet.");
+        $this->comment('COLUMN media_objects.thumbnail_key', "Cle de la miniature generee par le worker. NULL jusqu'a ce que le traitement aboutisse : voir media_ready_is_measured.");
+        $this->comment('COLUMN media_objects.status', "Cycle de vie du traitement asynchrone : pending (pre-signe, rien recu) -> processing (octets recus, worker pas encore tranche) -> ready | rejected (terminaux).");
+        $this->comment('COLUMN media_objects.declared_mime_type', "Type MIME ANNONCE par le client au moment de la demande de televersement, avant qu'aucun octet ne soit recu. Une promesse, pas une mesure.");
+        $this->comment('COLUMN media_objects.declared_size', "Taille ANNONCEE par le client en octets, avant transfert. Permet de rejeter une demande hors plafond sans attendre l'upload.");
+        $this->comment('COLUMN media_objects.mime_type', "Type MIME MESURE par le worker apres decodage reel des octets. Coexiste avec declared_mime_type : l'ecart entre les deux est ce qui declenche un rejet unsupported_type.");
+        $this->comment('COLUMN media_objects.width', 'Largeur mesuree par le worker, en pixels. NULL avant traitement.');
+        $this->comment('COLUMN media_objects.height', 'Hauteur mesuree par le worker, en pixels. NULL avant traitement.');
+        $this->comment('COLUMN media_objects.byte_size', 'Taille REELLE mesuree par le worker, en octets. Peut differer de declared_size, ce qui declenche un rejet too_large.');
+        $this->comment('COLUMN media_objects.rejection_reason', "Motif du refus. NULL sauf a l'etat rejected : voir media_rejected_has_reason.");
+        $this->comment('COLUMN media_objects.created_at', 'Instant de la demande de televersement (MediaObject::request()), en UTC.');
+        $this->comment('COLUMN media_objects.processed_at', "Instant ou le worker a tranche, pret ou rejete. NULL tant que le traitement n'a pas eu lieu.");
+
         $this->addSql(<<<'SQL'
             CREATE TABLE message_media (
                 message_id CHAR(26) NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -62,6 +78,11 @@ final class Version20260726144434 extends AbstractMigration
                 UNIQUE (message_id, position)
             )
             SQL);
+
+        $this->comment('TABLE message_media', "Rattachement d'un media a un message, distinct de media_objects : un media existe (upload, traitement) avant d'etre rattache a un message.");
+        $this->comment('COLUMN message_media.message_id', 'Message porteur. Supprime en cascade avec lui.');
+        $this->comment('COLUMN message_media.media_id', "Media rattache. UNIQUE : un media ne peut illustrer qu'un seul message, jamais partage entre plusieurs.");
+        $this->comment('COLUMN message_media.position', "Ordre d'affichage parmi les medias d'un meme message. UNIQUE par message : deux medias ne peuvent pas revendiquer le meme rang.");
 
         // T3 posait une EQUIVALENCE entre « supprime » et « sans contenu ».
         // Un message qui n'a jamais porte que des images la viole. On la
@@ -91,5 +112,11 @@ final class Version20260726144434 extends AbstractMigration
             SQL);
         $this->addSql('DROP TABLE message_media');
         $this->addSql('DROP TABLE media_objects');
+    }
+
+    /** COMMENT ON n'accepte pas de parametre lie : ce SQL est entierement litteral, d'ou l'echappement manuel. */
+    private function comment(string $target, string $comment): void
+    {
+        $this->addSql(sprintf("COMMENT ON %s IS '%s'", $target, str_replace("'", "''", $comment)));
     }
 }

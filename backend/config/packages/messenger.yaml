@@ -46,8 +46,15 @@ framework:
 
             # Un echec definitif ne doit pas disparaitre : il atterrit en base,
             # ou `messenger:failed:show` le retrouve.
+            #
+            # `auto_setup: false` : meme discipline que `media` ci-dessus. La
+            # table est creee par une migration explicite, pas par le premier
+            # message qui echoue — sinon elle n'existerait que sur les bases
+            # qui ont deja vu un echec, jamais sur une base neuve.
             failed:
                 dsn: 'doctrine://default?table_name=messenger_failed'
+                options:
+                    auto_setup: false
 
         routing:
             App\Media\Application\Command\ProcessMediaCommand: media

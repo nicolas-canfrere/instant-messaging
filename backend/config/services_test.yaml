@@ -34,6 +34,14 @@ services:
     # Rien ne consomme encore ce port (la tache 5 y ajoutera un handler) : le
     # compilateur retire sinon le service comme inutilise, et le test ne peut
     # plus le recuperer par le conteneur.
+    #
+    # `autowire: true` explicite : contrairement a MockClock ci-dessus, ce
+    # constructeur a de vrais arguments (Connection, MediaMapper,
+    # DomainEventCollectorInterface) que ce fichier ne fournit pas — sans
+    # autowire ils resteraient a zero et l'instanciation echouerait.
+    App\Media\Infrastructure\Persistence\DbalMediaRepository:
+        public: true
+        autowire: true
+
     App\Media\Domain\MediaRepositoryInterface:
         alias: App\Media\Infrastructure\Persistence\DbalMediaRepository
-        public: true
