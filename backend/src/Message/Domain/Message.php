@@ -18,9 +18,11 @@ final class Message
         private readonly MessageId $id,
         private readonly ConversationId $conversationId,
         private readonly UserId $senderId,
-        private readonly MessageContent $content,
+        private ?MessageContent $content,
         private readonly ClientMessageId $clientMessageId,
         private readonly \DateTimeImmutable $createdAt,
+        private ?\DateTimeImmutable $editedAt = null,
+        private ?\DateTimeImmutable $deletedAt = null,
     ) {
     }
 
@@ -32,7 +34,7 @@ final class Message
         ClientMessageId $clientMessageId,
         \DateTimeImmutable $now,
     ): self {
-        $message = new self($id, $conversationId, $senderId, $content, $clientMessageId, $now);
+        $message = new self($id, $conversationId, $senderId, $content, $clientMessageId, $now, null, null);
         $message->recordEvent(
             new MessageWasSent(
                 $id,
@@ -56,11 +58,13 @@ final class Message
         MessageId $id,
         ConversationId $conversationId,
         UserId $senderId,
-        MessageContent $content,
+        ?MessageContent $content,
         ClientMessageId $clientMessageId,
         \DateTimeImmutable $createdAt,
+        ?\DateTimeImmutable $editedAt = null,
+        ?\DateTimeImmutable $deletedAt = null,
     ): self {
-        return new self($id, $conversationId, $senderId, $content, $clientMessageId, $createdAt);
+        return new self($id, $conversationId, $senderId, $content, $clientMessageId, $createdAt, $editedAt, $deletedAt);
     }
 
     public function id(): MessageId
@@ -78,7 +82,7 @@ final class Message
         return $this->senderId;
     }
 
-    public function content(): MessageContent
+    public function content(): ?MessageContent
     {
         return $this->content;
     }
@@ -91,5 +95,21 @@ final class Message
     public function createdAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    public function editedAt(): ?\DateTimeImmutable
+    {
+        return $this->editedAt;
+    }
+
+    public function deletedAt(): ?\DateTimeImmutable
+    {
+        return $this->deletedAt;
+    }
+
+    /** `content` nul et `deletedAt` non nul sont la meme information : un seul point la lit. */
+    public function isDeleted(): bool
+    {
+        return null !== $this->deletedAt;
     }
 }

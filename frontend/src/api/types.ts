@@ -30,9 +30,12 @@ export type ApiMessage = {
   id: string;
   conversation_id: string;
   sender_id: string;
-  content: string;
+  /** `null` veut dire supprime pour tous : le serveur n'a plus la charge utile. */
+  content: string | null;
   client_message_id: string;
   created_at: string;
+  edited_at: string | null;
+  deleted_at: string | null;
 };
 
 export type MessagePageResponse = { items: ApiMessage[]; next_before: string | null };

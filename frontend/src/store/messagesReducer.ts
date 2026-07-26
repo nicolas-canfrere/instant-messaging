@@ -15,8 +15,10 @@ export type StoredMessage = {
   clientMessageId: string;
   conversationId: string;
   senderId: string;
-  content: string;
+  content: string | null;
   createdAt: string;
+  editedAt: string | null;
+  deletedAt: string | null;
   status: MessageStatus;
 };
 

@@ -108,7 +108,7 @@ export function MessageList({
             <p className="text-xs opacity-60">
               {userName(users, message.senderId)} · {formatTime(message.createdAt)}
             </p>
-            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            <p className="whitespace-pre-wrap break-words">{message.content ?? ''}</p>
 
             {/*
               Uniquement sur SES propres messages acquittes : un message encore

@@ -11,13 +11,16 @@ final readonly class MessageView
         public string $id,
         public string $conversationId,
         public string $senderId,
-        public string $content,
+        /** `null` veut dire supprime pour tous : il n'y a plus de charge utile. */
+        public ?string $content,
         public string $clientMessageId,
         public string $createdAt,
+        public ?string $editedAt,
+        public ?string $deletedAt,
     ) {
     }
 
-    /** @return array<string, string> */
+    /** @return array<string, string|null> */
     public function toArray(): array
     {
         return [
@@ -29,6 +32,8 @@ final readonly class MessageView
             // optimiste avec celui que le serveur confirme.
             'client_message_id' => $this->clientMessageId,
             'created_at' => $this->createdAt,
+            'edited_at' => $this->editedAt,
+            'deleted_at' => $this->deletedAt,
         ];
     }
 }

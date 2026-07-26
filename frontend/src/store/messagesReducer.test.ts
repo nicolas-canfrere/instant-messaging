@@ -16,6 +16,8 @@ function serverMessage(id: string, clientMessageId: string, content = 'texte'): 
     senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
     content,
     createdAt: '2026-07-25T10:00:00+00:00',
+    editedAt: null,
+    deletedAt: null,
     status: 'sent',
   };
 }
@@ -77,6 +79,8 @@ describe('messagesReducer', () => {
         senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
         content: 'bonjour',
         createdAt: '2026-07-25T10:00:00+00:00',
+        editedAt: null,
+        deletedAt: null,
         status: 'pending',
       },
     });
@@ -108,6 +112,8 @@ describe('messagesReducer', () => {
         senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
         content: 'bonjour',
         createdAt: '2026-07-25T10:00:00+00:00',
+        editedAt: null,
+        deletedAt: null,
         status: 'pending',
       },
     });
@@ -170,6 +176,8 @@ describe('messagesReducer', () => {
         senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
         content: 'bonjour',
         createdAt: '2026-07-25T10:00:00+00:00',
+        editedAt: null,
+        deletedAt: null,
         status: 'pending',
       },
     });
@@ -197,6 +205,8 @@ describe('messagesReducer', () => {
         senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
         content: 'en attente',
         createdAt: '2026-07-25T10:00:00+00:00',
+        editedAt: null,
+        deletedAt: null,
         status: 'pending',
       },
     });

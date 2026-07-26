@@ -37,6 +37,8 @@ function fromApiMessage(message: ApiMessage): StoredMessage {
     senderId: message.sender_id,
     content: message.content,
     createdAt: message.created_at,
+    editedAt: message.edited_at,
+    deletedAt: message.deleted_at,
     status: 'sent',
   };
 }
@@ -125,8 +127,10 @@ function toStoredMessage(payload: Record<string, unknown>): StoredMessage {
     clientMessageId: clientMessageId === '' ? id : clientMessageId,
     conversationId: readString(payload, 'conversation_id'),
     senderId: readString(payload, 'sender_id'),
-    content: readString(payload, 'content'),
+    content: readNullableString(payload, 'content'),
     createdAt: readString(payload, 'created_at'),
+    editedAt: readNullableString(payload, 'edited_at'),
+    deletedAt: readNullableString(payload, 'deleted_at'),
     status: 'sent',
   };
 }
@@ -291,6 +295,8 @@ export function useAppState(me: Me): AppState {
           senderId: me.id,
           content,
           createdAt: new Date().toISOString(),
+          editedAt: null,
+          deletedAt: null,
           status: 'pending',
         },
       });

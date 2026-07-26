@@ -23,6 +23,14 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
 
     public function insertIfAbsent(Message $message): ?Message
     {
+        // insertIfAbsent() n'insere jamais que le resultat de Message::send() :
+        // un tombstone n'est jamais insere, il resulte d'une edition ulterieure
+        // d'une ligne existante. Le contenu est donc toujours present ici.
+        $content = $message->content();
+        if (null === $content) {
+            throw new \LogicException('Un message fraichement envoye a toujours un contenu.');
+        }
+
         // Zero ligne rendue = la cle (sender_id, client_message_id) existe deja.
         // Le rejeu passe par du controle de flux ordinaire, pas par une
         // exception d'unicite rattrapee.
@@ -37,7 +45,7 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
                 'id' => $message->id()->toString(),
                 'conversation_id' => $message->conversationId()->toString(),
                 'sender_id' => $message->senderId()->toString(),
-                'content' => $message->content()->toString(),
+                'content' => $content->toString(),
                 'client_message_id' => $message->clientMessageId()->toString(),
                 'created_at' => $message->createdAt()->format(\DateTimeInterface::ATOM),
             ],
@@ -56,10 +64,10 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
 
     private function ofClientKey(UserId $senderId, ClientMessageId $clientMessageId): Message
     {
-        /** @var array{id: string, conversation_id: string, sender_id: string, content: string, client_message_id: string, created_at: string}|false $row */
+        /** @var array{id: string, conversation_id: string, sender_id: string, content: string|null, client_message_id: string, created_at: string, edited_at: string|null, deleted_at: string|null}|false $row */
         $row = $this->connection->fetchAssociative(
             <<<'SQL'
-                SELECT id, conversation_id, sender_id, content, client_message_id, created_at
+                SELECT id, conversation_id, sender_id, content, client_message_id, created_at, edited_at, deleted_at
                 FROM messages
                 WHERE sender_id = :sender_id
                   AND client_message_id = :client_message_id
