@@ -115,6 +115,15 @@ export function MessageList({
           // pas dans le meme jour QUE LE LECTEUR PERCOIT : deux messages
           // separes de quelques secondes peuvent tomber de part et d'autre de
           // minuit local, meme si le serveur les a recus dans le meme jour UTC.
+          // Extrait UNE fois, en tete : c'est l'identifiant SERVEUR, `null` tant
+          // que l'envoi optimiste n'est pas acquitte. Le nommer ici permet a
+          // TypeScript de retenir le retrecissement `!== null` sur toutes les
+          // conditions ci-dessous — sans quoi il faudrait des `as string`, et
+          // c'est precisement ce silence qui avait masque le bug ou
+          // `editingId === message.id` valait vrai pour `null === null`, donc
+          // pour TOUS les messages optimistes.
+          const messageId = message.id;
+
           const previous = thread.items[index - 1];
           const separator =
             previous === undefined ||
@@ -148,12 +157,12 @@ export function MessageList({
                 </p>
                 {message.deletedAt !== null ? (
                   <p className="italic opacity-60">{deletedMessageLabel}</p>
-                ) : editingId === message.id ? (
+                ) : messageId !== null && editingId === messageId ? (
                   <MessageEditor
                     initialContent={message.content ?? ''}
                     onSubmit={(content) => {
                       setEditingId(null);
-                      onEditMessage(message.id as string, content);
+                      onEditMessage(messageId, content);
                     }}
                     onCancel={() => setEditingId(null)}
                   />
@@ -165,16 +174,16 @@ export function MessageList({
                   Seulement sur SES propres messages vivants et acquittes : un
                   message optimiste n'a pas encore d'`id` serveur a envoyer.
                 */}
-                {message.senderId === meId && message.id !== null && message.deletedAt === null && (
+                {message.senderId === meId && messageId !== null && message.deletedAt === null && (
                   <MessageActions
                     onEdit={
                       canStillEdit(message.createdAt, Date.now())
-                        ? () => setEditingId(message.id)
+                        ? () => setEditingId(messageId)
                         : null
                     }
                     onDelete={() => {
                       if (window.confirm('Supprimer ce message pour tout le monde ?')) {
-                        onDeleteMessage(message.id as string);
+                        onDeleteMessage(messageId);
                       }
                     }}
                   />
@@ -185,12 +194,12 @@ export function MessageList({
                   optimiste n'a pas d'`id` serveur, donc aucun watermark ne peut le
                   designer, et le statut d'un message recu n'a pas de sens ici.
                 */}
-                {message.senderId === meId && message.id !== null && message.deletedAt === null && (
+                {message.senderId === meId && messageId !== null && message.deletedAt === null && (
                   <ReceiptTicks
-                    status={selectStatusFor(receiptsState, conversationId, message.id, meId)}
+                    status={selectStatusFor(receiptsState, conversationId, messageId, meId)}
                     readCount={
                       isGroup
-                        ? selectReadCount(receiptsState, conversationId, message.id, meId)
+                        ? selectReadCount(receiptsState, conversationId, messageId, meId)
                         : undefined
                     }
                   />
