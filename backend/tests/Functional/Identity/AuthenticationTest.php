@@ -33,6 +33,25 @@ final class AuthenticationTest extends DatabaseTestCase
         self::assertMatchesRegularExpression('/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/', $body['id']);
     }
 
+    /**
+     * 204 et non la redirection par defaut du pare-feu : le client est une
+     * application JavaScript, pas un navigateur qui suit des liens. Un 302 vers
+     * `/` renverrait le HTML de l'app, que `fetch` suivrait avant d'echouer a le
+     * lire en JSON — une deconnexion reussie qui remonte en erreur.
+     */
+    public function testLogoutEndsTheSessionWithoutRedirecting(): void
+    {
+        $this->login('alice');
+
+        $this->client->request('POST', '/api/logout');
+
+        self::assertResponseStatusCodeSame(204);
+
+        $this->client->request('GET', '/api/me');
+
+        self::assertResponseStatusCodeSame(401);
+    }
+
     public function testLoginWithWrongPasswordIsRejected(): void
     {
         $this->client->request(
