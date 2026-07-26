@@ -156,10 +156,17 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
       // Meme motif que `message/deleted` : reconciliation par `id` SERVEUR,
       // et un `id` absent du fil est ignore silencieusement (le message n'a
       // jamais ete charge dans ce thread).
+      //
+      // `deletedAt !== null` laisse l'item INTACT, et c'est un invariant, pas
+      // une optimisation : une retractation ne se defait pas. SSE ne garantit
+      // aucun ordre entre deux evenements distincts, un echo d'edition peut
+      // donc arriver apres un echo de suppression — remettre `content` ferait
+      // alors ressusciter dans le store une charge utile que le serveur a
+      // reellement effacee, contredisant « record soft, payload hard ».
       return patchThread(state, action.conversationId, (thread) => ({
         ...thread,
         items: thread.items.map((item) =>
-          item.id === action.id
+          item.id === action.id && item.deletedAt === null
             ? { ...item, content: action.content, editedAt: action.editedAt }
             : item,
         ),

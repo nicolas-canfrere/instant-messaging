@@ -361,6 +361,39 @@ describe('message/edited', () => {
     expect(at(selectThread(next, 'c1').items, 0).content).toBe('intact');
   });
 
+  /**
+   * SSE ne garantit aucun ordre entre deux evenements distincts : un echo
+   * d'edition peut arriver APRES un echo de suppression. La retractation est
+   * definitive — le message doit rester un tombstone, sans quoi l'etat du store
+   * contredirait « record soft, payload hard » (le rendu, lui, masquait le
+   * probleme : la branche tombstone passe avant).
+   */
+  it('laisse intact un message deja supprime', () => {
+    const received = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'bonjour' }),
+    });
+
+    const deleted = messagesReducer(received, {
+      type: 'message/deleted',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      deletedAt: '2026-07-26T09:10:00+00:00',
+    });
+
+    const next = messagesReducer(deleted, {
+      type: 'message/edited',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      content: 'ressuscite',
+      editedAt: '2026-07-26T09:05:00+00:00',
+    });
+
+    const item = at(selectThread(next, 'c1').items, 0);
+    expect(item.content).toBeNull();
+    expect(item.deletedAt).toBe('2026-07-26T09:10:00+00:00');
+  });
+
   // L'echo SSE et la reponse du PATCH portent le MEME etat final : les
   // appliquer dans n'importe quel ordre doit donner le meme resultat.
   it('donne le meme resultat quel que soit l ordre d arrivee', () => {
