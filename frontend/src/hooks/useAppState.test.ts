@@ -153,4 +153,30 @@ describe('useAppState', () => {
     expect(result.current.selectedId).toBeNull();
     expect(result.current.conversations).toEqual([]);
   });
+
+  /**
+   * Le depart a REUSSI des que le 204 est la ; ce qui echoue ensuite n'est
+   * qu'un geste de suivi. Laisser ce rejet remonter faisait passer un succes
+   * pour un echec — et pire, en silence : `MembersPanel` recevait bien
+   * l'erreur, mais la deselection venait de le demonter, donc son `setError`
+   * ne peignait plus rien. Meme motif que `afterCreated`.
+   */
+  it('ne transforme pas un depart reussi en echec quand le rafraichissement casse', async () => {
+    vi.mocked(api.conversations)
+      .mockResolvedValueOnce([conversationSummary(CONVERSATION_ID)])
+      .mockRejectedValue(new Error('reseau'));
+    vi.mocked(api.leaveConversation).mockResolvedValue(undefined);
+
+    // La panne part dans la console, comme toute anomalie temps reel.
+    const console_ = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { result } = await renderWithLoadedThread();
+
+    await act(async () => {
+      await expect(result.current.leaveConversation(CONVERSATION_ID)).resolves.toBeUndefined();
+    });
+
+    expect(result.current.selectedId).toBeNull();
+    expect(console_).toHaveBeenCalled();
+  });
 });

@@ -362,7 +362,18 @@ export function useAppState(me: Me): AppState {
       // `resubscribe()` deja en place et reste sans effet supplementaire — la
       // liste rechargee ne contient de toute facon plus la conversation.
       setSelectedId(null);
-      await refreshConversations();
+
+      // Le depart a REUSSI des que le 204 est la ; le rafraichissement n'est
+      // qu'un geste de suivi. Laisser son rejet remonter ferait passer un
+      // succes pour un echec — et en silence, car la deselection ci-dessus
+      // vient de demonter `MembersPanel` : son `setError` ne peindrait plus
+      // rien. On degrade donc comme `afterCreated` : la liste reste perimee,
+      // mais l'anomalie part dans la console.
+      try {
+        await refreshConversations();
+      } catch (cause) {
+        reportRealtimeIssue('rafraichissement apres depart echoue', cause);
+      }
     },
     [refreshConversations],
   );
