@@ -7,6 +7,7 @@ namespace App\Conversation\Infrastructure\Http;
 use App\Conversation\Application\Command\RemoveMemberCommand;
 use App\Conversation\Application\Query\GetConversationQuery;
 use App\Conversation\Infrastructure\Security\ConversationVoter;
+use App\Shared\Domain\Identifier\AbstractUlidIdentifier;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
 use App\Shared\Infrastructure\Bus\CommandDispatcher;
@@ -31,6 +32,10 @@ final readonly class RemoveMemberController
     #[Route(
         '/api/conversations/{conversationId}/members/{userId}',
         name: 'conversation_members_remove',
+        // Sans cette contrainte, cette route capterait `/members/me` selon
+        // l'ordre de chargement des fichiers, et repondrait 403 a un simple
+        // membre qui cherche a partir.
+        requirements: ['userId' => AbstractUlidIdentifier::ROUTE_PATTERN],
         methods: ['DELETE'],
     )]
     public function __invoke(

@@ -78,6 +78,13 @@ export const api = {
       body: JSON.stringify({ user_ids: userIds }),
     }),
 
+  // `me` et non son propre ULID : partir est un geste sur soi, le serveur sait
+  // deja qui appelle. Le front n'a donc pas a construire l'URL avec son id.
+  leaveConversation: (conversationId: string) =>
+    request<void>(`/api/conversations/${conversationId}/members/me`, {
+      method: 'DELETE',
+    }),
+
   realtimeToken: () => request<RealtimeToken>('/api/realtime/token'),
 
   heartbeat: () => request<HeartbeatResponse>('/api/presence/heartbeat', { method: 'POST' }),

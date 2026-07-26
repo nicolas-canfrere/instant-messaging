@@ -7,6 +7,8 @@ import { userName } from './labels';
 type Props = {
   conversationId: string;
   users: Record<string, UserSummary>;
+  meId: string;
+  onLeave: () => Promise<void>;
   onClose: () => void;
 };
 
@@ -18,7 +20,7 @@ type Props = {
  * `useAppState` y ajouterait un etat global pour une donnee locale et ephemere.
  * Le detail est donc charge a l'ouverture et rechargee apres chaque ajout.
  */
-export function MembersPanel({ conversationId, users, onClose }: Props) {
+export function MembersPanel({ conversationId, users, meId, onLeave, onClose }: Props) {
   const [members, setMembers] = useState<ConversationMember[] | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +55,40 @@ export function MembersPanel({ conversationId, users, onClose }: Props) {
   // rien pour ne pas proposer d'ajouter quelqu'un qui y est deja.
   const candidates =
     members === null ? [] : Object.values(users).filter((user) => !memberIds.has(user.id));
+
+  // Un admin ne peut pas partir tant qu'il n'a pas transfere ses droits : le
+  // serveur repond 409. On ne lui montre donc pas le bouton, plutot que de lui
+  // proposer une action qu'on sait refusee. Tant que la liste n'est pas
+  // chargee, on ne sait pas quel est notre role : on n'affiche rien non plus.
+  const canLeave = (members ?? []).some(
+    (member) => member.user_id === meId && member.role === 'member',
+  );
+
+  // Miroir exact de la regle ci-dessus : seul un admin modifie la composition
+  // du groupe, le serveur repond 403 aux autres — et le voter le journalise en
+  // `warning`, precisement pour signaler une interface qui propose une action
+  // interdite. Meme prudence sur la liste non chargee : on n'affiche rien tant
+  // qu'on ignore son propre role.
+  const canAddMembers = (members ?? []).some(
+    (member) => member.user_id === meId && member.role === 'admin',
+  );
+
+  async function leave() {
+    if (!window.confirm('Quitter ce groupe ? Vous ne le verrez plus.')) return;
+
+    setBusy(true);
+    setError(null);
+
+    try {
+      await onLeave();
+      // Pas de `setBusy(false)` au succes : la conversation disparait de la
+      // liste, `selected` repasse a `null` et tout ce sous-arbre est demonte.
+      // Toucher l'etat d'un composant demonte n'aurait aucun effet.
+    } catch (cause) {
+      setError(cause instanceof ProblemError ? cause.detail : 'Depart impossible.');
+      setBusy(false);
+    }
+  }
 
   function toggle(userId: string) {
     setSelected((current) =>
@@ -108,7 +144,7 @@ export function MembersPanel({ conversationId, users, onClose }: Props) {
         </ul>
       )}
 
-      {candidates.length > 0 && (
+      {canAddMembers && candidates.length > 0 && (
         <>
           <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ajouter</h4>
 
@@ -136,6 +172,17 @@ export function MembersPanel({ conversationId, users, onClose }: Props) {
             {busy ? 'Ajout…' : 'Ajouter au groupe'}
           </button>
         </>
+      )}
+
+      {canLeave && (
+        <button
+          type="button"
+          onClick={() => void leave()}
+          disabled={busy}
+          className="mt-auto rounded border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-40"
+        >
+          Quitter le groupe
+        </button>
       )}
 
       {error !== null && (

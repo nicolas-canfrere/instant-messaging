@@ -180,6 +180,12 @@ final class Conversation
         $this->notifyJoined($userId);
     }
 
+    /**
+     * Le geste de l'admin sur quelqu'un d'autre — ou sur lui-meme, la route de
+     * retrait ne l'interdit pas. D'ou le garde : sans lui, l'unique admin
+     * s'excluerait lui-meme et contournerait AdminCannotLeaveException par la
+     * porte d'a cote, laissant un groupe que plus personne ne peut administrer.
+     */
     public function removeMember(UserId $userId): void
     {
         $this->assertIsGroup();
@@ -188,12 +194,55 @@ final class Conversation
             return;
         }
 
+        if ($this->isLastAdmin($userId)) {
+            throw LastAdminCannotBeRemovedException::forUser($userId);
+        }
+
         $this->members = array_values(array_filter(
             $this->members,
             static fn(Member $member): bool => !$member->userId->equals($userId),
         ));
 
         $this->recordEvent(new MembershipChanged($this->id, $userId, MembershipChange::Left));
+    }
+
+    /**
+     * Partir de son propre chef. Distincte de `removeMember()`, qui est le
+     * geste de l'admin : deux regles differentes sur la meme mutation. Un admin
+     * ne peut pas partir tant qu'il n'a pas transfere ses droits — sans quoi le
+     * groupe se retrouverait sans personne pour en gerer la composition.
+     */
+    public function leave(UserId $userId): void
+    {
+        $this->assertIsGroup();
+
+        if (!$this->hasMember($userId)) {
+            return;
+        }
+
+        if ($this->isAdmin($userId)) {
+            throw AdminCannotLeaveException::forUser($userId);
+        }
+
+        $this->removeMember($userId);
+    }
+
+    /**
+     * Formule au singulier ce que la regle protege : tant qu'il reste un autre
+     * admin, retirer celui-ci ne laisse pas le groupe orphelin.
+     */
+    private function isLastAdmin(UserId $userId): bool
+    {
+        if (!$this->isAdmin($userId)) {
+            return false;
+        }
+
+        $admins = array_filter(
+            $this->members,
+            static fn(Member $member): bool => MemberRole::Admin === $member->role,
+        );
+
+        return 1 === \count($admins);
     }
 
     /**

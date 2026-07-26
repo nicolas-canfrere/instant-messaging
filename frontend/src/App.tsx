@@ -91,6 +91,7 @@ function Workspace({ me, onLogout }: { me: Me; onLogout: () => void }) {
     editMessage,
     createDirect,
     createGroup,
+    leaveConversation,
   } = useAppState(me);
 
   // Ouverture du dialogue de creation : etat d'affichage, il ne concerne que
@@ -156,6 +157,10 @@ function Workspace({ me, onLogout }: { me: Me; onLogout: () => void }) {
             });
           }}
           onTyping={() => notifyTyping(selected.id)}
+          // Pas de `window.alert` ici, contrairement a `onDeleteMessage` et
+          // `onEditMessage` ci-dessus : la promesse est rendue telle quelle au
+          // panneau, qui affiche l'echec dans son propre `role="alert"`.
+          onLeave={() => leaveConversation(selected.id)}
         />
       )}
 
