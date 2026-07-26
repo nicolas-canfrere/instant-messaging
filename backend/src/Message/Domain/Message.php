@@ -150,6 +150,16 @@ final class Message
      * Editer avec le contenu actuel n'enregistre AUCUN evenement — meme
      * mecanique que le rejeu d'envoi : rien d'enregistre, donc rien de republie,
      * sans un seul `if` dans le handler.
+     *
+     * L'ordre des gardes est significatif : auteur, puis supprime, puis contenu
+     * inchange, puis fenetre.
+     *  - la suppression passe AVANT le no-op parce qu'un tombstone a un `content`
+     *    nul : la comparaison ne matcherait jamais, et editer un tombstone doit
+     *    rendre 409 quelle que soit la charge utile envoyee ;
+     *  - la fenetre passe APRES le no-op parce qu'un PATCH rejoue a l'identique
+     *    ne change rien : le refuser en 403 punirait un reessai reseau pour une
+     *    ecriture qui n'aurait de toute facon pas eu lieu. La fenetre protege
+     *    une reecriture de l'histoire, pas une repetition sans effet.
      */
     public function edit(UserId $editor, MessageContent $content, \DateTimeImmutable $now): void
     {
@@ -161,12 +171,12 @@ final class Message
             throw MessageAlreadyDeletedException::forMessage($this->id);
         }
 
-        if ($now->getTimestamp() - $this->createdAt->getTimestamp() > self::EDIT_WINDOW_SECONDS) {
-            throw EditWindowExpiredException::create();
-        }
-
         if ($content->toString() === $this->content?->toString()) {
             return;
+        }
+
+        if ($now->getTimestamp() - $this->createdAt->getTimestamp() > self::EDIT_WINDOW_SECONDS) {
+            throw EditWindowExpiredException::create();
         }
 
         $this->content = $content;

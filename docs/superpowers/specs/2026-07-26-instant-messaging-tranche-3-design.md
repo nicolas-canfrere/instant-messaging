@@ -206,6 +206,15 @@ pour faire de l'horloge un port — elle trouve ici son second usage.
 `EDIT_WINDOW_SECONDS = 900` est une constante de l'agrégat, en `SCREAMING_SNAKE_CASE`, et non un
 paramètre de configuration : c'est une règle métier, pas un réglage d'exploitation.
 
+**L'ordre des gardes de `edit()` est significatif : auteur → supprimé → contenu inchangé → fenêtre.**
+
+- La suppression passe **avant** le no-op : un tombstone a un `content` nul, la comparaison ne
+  matcherait donc jamais, et éditer un tombstone doit répondre 409 quelle que soit la charge utile.
+- La fenêtre passe **après** le no-op, et c'est ce qui rend `PATCH` idempotent hors fenêtre. Rejouer
+  à l'identique un `PATCH` déjà appliqué ne change rien ; le refuser en 403 punirait un réessai
+  réseau pour une écriture qui n'aurait de toute façon pas eu lieu. La fenêtre protège d'une
+  **réécriture** de l'histoire, pas d'une répétition sans effet.
+
 ### 3.3 Les deux no-op sont le mécanisme d'idempotence, pas une optimisation
 
 > [!important]

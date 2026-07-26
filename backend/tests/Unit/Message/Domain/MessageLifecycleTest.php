@@ -197,6 +197,27 @@ final class MessageLifecycleTest extends TestCase
         self::assertNull($message->editedAt(), 'Un no-op ne marque pas le message comme modifie.');
     }
 
+    /**
+     * La fenetre ne se controle qu'apres le no-op : rejouer a l'identique un
+     * PATCH deja applique reste sans effet passe quinze minutes, au lieu de
+     * repondre 403 pour un changement qui n'aurait rien change.
+     */
+    public function testEditingWithTheSameContentAfterTheWindowIsStillANoOp(): void
+    {
+        $message = self::send();
+        $message->releaseEvents();
+
+        $message->edit(
+            UserId::fromString(self::AUTHOR_ID),
+            MessageContent::fromString('bonjour'),
+            new \DateTimeImmutable('2026-07-26T09:00:00+00:00')
+                ->modify(sprintf('+%d seconds', Message::EDIT_WINDOW_SECONDS + 1)),
+        );
+
+        self::assertSame([], $message->releaseEvents());
+        self::assertNull($message->editedAt());
+    }
+
     private static function send(): Message
     {
         return Message::send(
