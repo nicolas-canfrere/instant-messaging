@@ -191,6 +191,7 @@ export type AppState = {
   editMessage: (conversationId: string, messageId: string, content: string) => Promise<void>;
   createDirect: (peerId: string) => Promise<void>;
   createGroup: (title: string, memberIds: string[]) => Promise<void>;
+  leaveConversation: (conversationId: string) => Promise<void>;
 };
 
 export function useAppState(me: Me): AppState {
@@ -345,6 +346,25 @@ export function useAppState(me: Me): AppState {
       });
     },
     [],
+  );
+
+  // L'appel ne peut pas rester dans `MembersPanel` comme l'ajout de membres :
+  // partir a des consequences GLOBALES — la conversation ouverte disparait, la
+  // selection devient invalide — et ce hook est le seul a pouvoir les porter.
+  const leaveConversation = useCallback(
+    async (conversationId: string) => {
+      await api.leaveConversation(conversationId);
+
+      // On applique des le 204, sans attendre l'echo SSE : meme choix que la
+      // suppression d'un message. Si le hub est injoignable, l'echo n'arrivera
+      // JAMAIS et la conversation resterait affichee sans la moindre erreur
+      // visible. L'echo `membership.changed` qui suit declenche le
+      // `resubscribe()` deja en place et reste sans effet supplementaire — la
+      // liste rechargee ne contient de toute facon plus la conversation.
+      setSelectedId(null);
+      await refreshConversations();
+    },
+    [refreshConversations],
   );
 
   const editMessage = useCallback(
@@ -689,5 +709,6 @@ export function useAppState(me: Me): AppState {
     editMessage,
     createDirect,
     createGroup,
+    leaveConversation,
   };
 }

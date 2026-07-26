@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { api } from '../api/client';
-import type { ApiMessage, Me } from '../api/types';
+import type { ApiMessage, ConversationSummary, Me } from '../api/types';
 import { selectThread } from '../store/messagesReducer';
 import { useAppState } from './useAppState';
 
@@ -31,6 +31,7 @@ vi.mock('../api/client', () => ({
     receipts: vi.fn(),
     deleteMessage: vi.fn(),
     editMessage: vi.fn(),
+    leaveConversation: vi.fn(),
   },
 }));
 
@@ -49,6 +50,18 @@ function apiMessage(overrides: Partial<ApiMessage> = {}): ApiMessage {
     edited_at: null,
     deleted_at: null,
     ...overrides,
+  };
+}
+
+function conversationSummary(id: string): ConversationSummary {
+  return {
+    id,
+    type: 'group',
+    title: 'Equipe projet',
+    last_message_at: null,
+    last_message_preview: null,
+    last_message_sender_id: null,
+    unread_count: 0,
   };
 }
 
@@ -113,5 +126,31 @@ describe('useAppState', () => {
     // lever le drapeau du tombstone, jamais a ordonner.
     expect(item?.deletedAt).not.toBeNull();
     expect(Number.isNaN(new Date(item?.deletedAt ?? '').getTime())).toBe(false);
+  });
+
+  /**
+   * Meme motif que la suppression d'un message : on applique des le 204. Si le
+   * hub est injoignable, l'echo `membership.changed` n'arrivera jamais et la
+   * conversation quittee resterait affichee, selectionnee, sans erreur visible.
+   */
+  it('deselectionne la conversation quittee des le 204, sans attendre l echo SSE', async () => {
+    // Une conversation au montage, plus aucune au rafraichissement d'apres le
+    // depart : c'est exactement ce que le serveur renverra.
+    vi.mocked(api.conversations)
+      .mockResolvedValueOnce([conversationSummary(CONVERSATION_ID)])
+      .mockResolvedValue([]);
+    vi.mocked(api.leaveConversation).mockResolvedValue(undefined);
+
+    const { result } = await renderWithLoadedThread();
+
+    expect(result.current.selectedId).toBe(CONVERSATION_ID);
+
+    await act(async () => {
+      await result.current.leaveConversation(CONVERSATION_ID);
+    });
+
+    expect(api.leaveConversation).toHaveBeenCalledWith(CONVERSATION_ID);
+    expect(result.current.selectedId).toBeNull();
+    expect(result.current.conversations).toEqual([]);
   });
 });
