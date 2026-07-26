@@ -41,7 +41,7 @@ serveur**. Masquer à l'affichage ne suffirait pas : un client modifié lirait e
 | Fenêtre temporelle ? | **édition ≤ 15 min, suppression sans limite** | [§3.2](#32-la-fenêtre-dédition-est-un-invariant-de-lagrégat) |
 | Forme du tombstone dans le contrat | **`content: null` + `deleted_at`** | [§6.1](#61-messageview-change-de-forme) |
 | Routes | **imbriquées sous la conversation** | [§5.1](#51-les-deux-routes) |
-| `id` d'événement Mercure sur les nouveaux événements | **aucun** | [§4.2](#42-aucun-id-dévénement-mercure-et-cest-une-décision) |
+| `id` d'événement Mercure sur les nouveaux événements | **aucun fourni par le publieur** (le hub assigne le sien) | [§4.2](#42-aucun-id-dévénement-mercure-fourni-par-le-publieur-et-cest-une-décision) |
 | Un message supprimé reste-t-il non lu ? | **oui** | [§6.3](#63-ce-que-la-tranche-2-ne-remarque-même-pas) |
 | Fuseau utilisateur persisté ? | **non** | [§8.4](#84-le-fuseau-nest-pas-persisté) |
 
@@ -309,21 +309,29 @@ Publication sur le topic `/conversations/{id}`, en *private update*, construit p
 `edited_at` et `deleted_at` sont au format ISO 8601 `ATOM`, comme `created_at` — même format que
 l'historique, sinon tout tri par chaîne mélange les deux sources.
 
-### 4.2 Aucun `id` d'événement Mercure, et c'est une décision
+### 4.2 Aucun `id` d'événement Mercure **fourni par le publieur**, et c'est une décision
 
 La tranche 1 pose que l'`id` d'un événement Mercure est **l'ULID du message**, ce qui rendra
 `Last-Event-ID` exploitable sans changer de format. La tranche 2 a déjà exempté `typing.started` et
 `receipt.updated`, qui ne décrivent pas un point du fil.
 
-Ici le motif est plus fort qu'une simple absence de pertinence. Éditer un message ancien émettrait un
-événement portant un ULID **antérieur** à ceux déjà reçus par le client. Un `Last-Event-ID` qui recule
-ferait rejouer au hub tout l'historique depuis ce point à la reconnexion suivante.
+Ici le motif est plus fort qu'une simple absence de pertinence. Le seul candidat naturel serait l'ULID
+du message : éditer un message ancien émettrait alors un événement portant un identifiant **antérieur**
+à ceux déjà reçus par le client. Un `Last-Event-ID` qui recule ferait rejouer au hub tout l'historique
+depuis ce point à la reconnexion suivante.
 
 > **Un identifiant de reprise qui recule est pire que pas de reprise du tout.**
 
-`message.edited` et `message.deleted` sont donc **non rejouables** : un client déconnecté pendant une
-édition la découvrira en rechargeant la page d'historique, qui porte déjà l'état à jour. C'est le
-comportement correct, et il est écrit plutôt que subi.
+> [!important] Ne pas fournir d'`id` ne rend pas l'événement non rejouable
+> Quand le publieur n'en fournit pas, **le hub en assigne un lui-même** — un `urn:uuid:` v7, donc
+> monotone. `message.edited` et `message.deleted` participent donc à la reprise par `Last-Event-ID`
+> comme `message.created` : un client brièvement déconnecté les reçoit à la reconnexion.
+> Vérifié sur le hub du projet (Mercure 0.24.2, transport par défaut) : deux publications sans `id`
+> reçoivent des `urn:uuid:019f…` croissants, et une reconnexion portant le premier rejoue le second.
+>
+> Ce que la décision achète n'est donc pas « pas de reprise », c'est **une reprise qui n'a aucun moyen
+> de reculer** : le curseur du client reste piloté par une suite croissante, quel que soit l'âge du
+> message que l'événement concerne.
 
 ### 4.3 L'édition n'a pas besoin d'un `client_message_id`
 
@@ -678,8 +686,9 @@ rend les six suivantes additives et relisibles.
 
 « Supprimer pour moi » et la table `message_hidden` · retrait par un modérateur et modération en
 général (T5) · historique des versions d'un message · hard delete RGPD et crypto-shredding · messages
-éphémères et purge par TTL · préférence de fuseau persistée côté serveur · reprise `Last-Event-ID` sur
-`message.edited` et `message.deleted` (§4.2) · annulation d'une suppression · notification aux
+éphémères et purge par TTL · préférence de fuseau persistée côté serveur · identifiant d'événement
+Mercure **choisi par le publieur** sur `message.edited` et `message.deleted` (§4.2) · annulation d'une
+suppression · notification aux
 destinataires qu'un message a été édité hors de leur vue courante · distinction, dans l'aperçu de la
 liste de conversations, entre « aucun message » et « dernier message supprimé » (§6.4).
 

@@ -10,16 +10,18 @@ use App\Shared\Application\Bus\DomainEventListenerInterface;
 use App\Shared\Domain\Event\MessageWasDeleted;
 
 /**
- * Aucun `id` d'evenement SSE, et c'est une decision.
+ * Aucun `id` d'evenement SSE fourni par le publieur, et c'est une decision.
  *
- * L'id d'un evenement Mercure est l'ULID du message. Supprimer un message
- * ancien emettrait donc un id ANTERIEUR a ceux deja recus : le Last-Event-ID du
- * client reculerait, et le hub lui rejouerait tout l'historique depuis ce point
- * a la reconnexion suivante. Un identifiant de reprise qui recule est pire que
- * pas de reprise du tout.
+ * Le seul candidat naturel serait l'ULID du message. Supprimer un message ancien
+ * emettrait donc un id ANTERIEUR a ceux deja recus : le Last-Event-ID du client
+ * reculerait, et le hub lui rejouerait tout l'historique depuis ce point a la
+ * reconnexion suivante. Un identifiant de reprise qui recule est pire que pas de
+ * reprise du tout.
  *
- * Consequence assumee : un client deconnecte pendant une suppression la
- * decouvre en rechargeant l'historique, qui porte deja l'etat a jour.
+ * Ne rien fournir ne rend PAS l'evenement non rejouable : le hub attribue alors
+ * son propre identifiant, monotone, et la reprise par Last-Event-ID reste
+ * coherente — une suppression manquee pendant une deconnexion breve est rejouee
+ * comme les autres.
  */
 final readonly class PublishMessageWasDeletedListener implements DomainEventListenerInterface
 {

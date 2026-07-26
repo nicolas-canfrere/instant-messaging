@@ -10,9 +10,11 @@ use App\Shared\Application\Bus\DomainEventListenerInterface;
 use App\Shared\Domain\Event\MessageWasEdited;
 
 /**
- * Aucun `id` d'evenement SSE : editer un message ancien emettrait un id
- * ANTERIEUR a ceux deja recus, et le Last-Event-ID du client reculerait. Meme
- * raison que pour `message.deleted`.
+ * Aucun `id` d'evenement SSE fourni par le publieur : le seul candidat naturel
+ * serait l'ULID du message, et editer un message ancien emettrait un id
+ * ANTERIEUR a ceux deja recus, faisant reculer le Last-Event-ID du client. Le
+ * hub attribue donc le sien, monotone, et la reprise reste coherente. Meme
+ * raison et meme consequence que pour `message.deleted`.
  *
  * Pas de `client_message_id` non plus, et ce n'est pas un oubli : la cle de
  * reconciliation existe deja, c'est l'`id` serveur. Le message est en base, le
