@@ -103,6 +103,22 @@ describe('MessageList', () => {
     expect(screen.getByLabelText('Modifier le message')).toBeDefined();
   });
 
+  /**
+   * Le temps relatif est offert au survol de l'heure. Le test verrouille le
+   * cablage, pas le libelle (`dates.test.ts` s'en charge) : une fonction
+   * correcte que personne n'appelle a l'air livree sans l'etre.
+   */
+  it('offre le temps relatif au survol de l heure', () => {
+    const { container } = renderList(
+      threadOf(message({ createdAt: '2026-07-26T12:00:00+00:00' })),
+    );
+
+    const time = container.querySelector('time');
+
+    expect(time?.getAttribute('dateTime')).toBe('2026-07-26T12:00:00+00:00');
+    expect(time?.getAttribute('title')).not.toBe('');
+  });
+
   /** Le menu ne s'affiche que sur SES messages : rien a editer chez les autres. */
   it("n'offre pas le menu sur le message d'un autre", () => {
     renderList(threadOf(message({ senderId: 'user-bob' })));

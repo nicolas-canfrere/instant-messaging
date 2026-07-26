@@ -6,7 +6,13 @@ import {
   selectStatusFor,
   type ReceiptsState,
 } from '../store/receiptsReducer';
-import { dayKey, formatDaySeparator, viewerLocale, viewerTimeZone } from './dates';
+import {
+  dayKey,
+  formatDaySeparator,
+  formatRelative,
+  viewerLocale,
+  viewerTimeZone,
+} from './dates';
 import { canStillEdit, deletedMessageLabel, editedMessageLabel, formatTime, userName } from './labels';
 import { MessageActions } from './MessageActions';
 import { MessageEditor } from './MessageEditor';
@@ -152,7 +158,22 @@ export function MessageList({
                 } ${message.status === 'failed' ? 'opacity-70 ring-1 ring-red-400' : ''}`}
               >
                 <p className="text-xs opacity-60">
-                  {userName(users, message.senderId)} · {formatTime(message.createdAt, timeZone, locale)}
+                  {userName(users, message.senderId)} ·{' '}
+                  {/*
+                    L'heure exacte reste lisible ; le temps relatif (« il y a 5
+                    minutes ») est offert au survol, ou il ne coute aucune place
+                    a l'ecran. `dateTime` porte l'instant absolu ISO, donc non
+                    ambigu pour tout ce qui lit la page autrement qu'avec des
+                    yeux. `now` et `locale` sont ceux resolus une seule fois en
+                    tete de liste : en resoudre d'autres ici referait un appel
+                    Intl par message.
+                  */}
+                  <time
+                    dateTime={message.createdAt}
+                    title={formatRelative(message.createdAt, now, locale)}
+                  >
+                    {formatTime(message.createdAt, timeZone, locale)}
+                  </time>
                   {message.editedAt !== null && ` · ${editedMessageLabel}`}
                 </p>
                 {message.deletedAt !== null ? (
