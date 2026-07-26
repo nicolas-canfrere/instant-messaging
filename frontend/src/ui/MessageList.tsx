@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type UIEvent } from 'react';
+import { Fragment, useLayoutEffect, useRef, useState, type UIEvent } from 'react';
 import type { UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
 import {
@@ -6,6 +6,7 @@ import {
   selectStatusFor,
   type ReceiptsState,
 } from '../store/receiptsReducer';
+import { dayKey, formatDaySeparator, viewerLocale, viewerTimeZone } from './dates';
 import { canStillEdit, deletedMessageLabel, editedMessageLabel, formatTime, userName } from './labels';
 import { MessageActions } from './MessageActions';
 import { MessageEditor } from './MessageEditor';
@@ -53,6 +54,12 @@ export function MessageList({
   const atBottom = useRef(true);
   /** Le message actuellement en cours d'edition, ou aucun. Purement local a l'affichage. */
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Resolus une fois par rendu de liste plutot qu'a chaque message : ces appels
+  // Intl ne sont pas gratuits, et la valeur ne change pas en cours de session.
+  const timeZone = viewerTimeZone();
+  const locale = viewerLocale();
+  const now = new Date();
 
   // Corrige le saut de scroll provoque par l'insertion d'une page plus ancienne
   // EN TETE de la liste. Doit etre appele avant l'effet de suivi ci-dessous :
@@ -103,76 +110,100 @@ export function MessageList({
       )}
 
       <ul className="flex flex-col gap-2">
-        {thread.items.map((message) => (
-          // La cle est l'identifiant client : c'est le seul qui existe des le
-          // rendu optimiste, avant que le serveur n'attribue un ULID. Utiliser
-          // `id` ferait remonter le composant a l'acquittement.
-          <li
-            key={message.clientMessageId}
-            className={`relative group max-w-[75%] rounded px-3 py-2 ${
-              message.senderId === meId ? 'self-end bg-slate-900 text-white' : 'bg-white text-slate-900'
-            } ${message.status === 'failed' ? 'opacity-70 ring-1 ring-red-400' : ''}`}
-          >
-            <p className="text-xs opacity-60">
-              {userName(users, message.senderId)} · {formatTime(message.createdAt)}
-              {message.editedAt !== null && ` · ${editedMessageLabel}`}
-            </p>
-            {message.deletedAt !== null ? (
-              <p className="italic opacity-60">{deletedMessageLabel}</p>
-            ) : editingId === message.id ? (
-              <MessageEditor
-                initialContent={message.content ?? ''}
-                onSubmit={(content) => {
-                  setEditingId(null);
-                  onEditMessage(message.id as string, content);
-                }}
-                onCancel={() => setEditingId(null)}
-              />
-            ) : (
-              <p className="whitespace-pre-wrap break-words">{message.content}</p>
-            )}
+        {thread.items.map((message, index) => {
+          // Un separateur de jour s'insere quand le message precedent n'est
+          // pas dans le meme jour QUE LE LECTEUR PERCOIT : deux messages
+          // separes de quelques secondes peuvent tomber de part et d'autre de
+          // minuit local, meme si le serveur les a recus dans le meme jour UTC.
+          const previous = thread.items[index - 1];
+          const separator =
+            previous === undefined ||
+            dayKey(previous.createdAt, timeZone) !== dayKey(message.createdAt, timeZone)
+              ? formatDaySeparator(message.createdAt, timeZone, locale, now)
+              : null;
 
-            {/*
-              Seulement sur SES propres messages vivants et acquittes : un
-              message optimiste n'a pas encore d'`id` serveur a envoyer.
-            */}
-            {message.senderId === meId && message.id !== null && message.deletedAt === null && (
-              <MessageActions
-                onEdit={
-                  canStillEdit(message.createdAt, Date.now())
-                    ? () => setEditingId(message.id)
-                    : null
-                }
-                onDelete={() => {
-                  if (window.confirm('Supprimer ce message pour tout le monde ?')) {
-                    onDeleteMessage(message.id as string);
-                  }
-                }}
-              />
-            )}
+          return (
+            // La cle reste l'identifiant client : c'est le seul qui existe des
+            // le rendu optimiste, avant que le serveur n'attribue un ULID.
+            // Utiliser `id` ferait remonter le composant a l'acquittement. Le
+            // `Fragment` permet de rendre le separateur et le message comme
+            // deux freres sans conteneur supplementaire dans la liste.
+            <Fragment key={message.clientMessageId}>
+              {separator !== null && separator !== '' && (
+                <li className="sticky top-0 self-center rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-600">
+                  {separator}
+                </li>
+              )}
 
-            {/*
-              Uniquement sur SES propres messages acquittes : un message encore
-              optimiste n'a pas d'`id` serveur, donc aucun watermark ne peut le
-              designer, et le statut d'un message recu n'a pas de sens ici.
-            */}
-            {message.senderId === meId && message.id !== null && message.deletedAt === null && (
-              <ReceiptTicks
-                status={selectStatusFor(receiptsState, conversationId, message.id, meId)}
-                readCount={
-                  isGroup
-                    ? selectReadCount(receiptsState, conversationId, message.id, meId)
-                    : undefined
-                }
-              />
-            )}
+              <li
+                className={`relative group max-w-[75%] rounded px-3 py-2 ${
+                  message.senderId === meId
+                    ? 'self-end bg-slate-900 text-white'
+                    : 'bg-white text-slate-900'
+                } ${message.status === 'failed' ? 'opacity-70 ring-1 ring-red-400' : ''}`}
+              >
+                <p className="text-xs opacity-60">
+                  {userName(users, message.senderId)} · {formatTime(message.createdAt, timeZone, locale)}
+                  {message.editedAt !== null && ` · ${editedMessageLabel}`}
+                </p>
+                {message.deletedAt !== null ? (
+                  <p className="italic opacity-60">{deletedMessageLabel}</p>
+                ) : editingId === message.id ? (
+                  <MessageEditor
+                    initialContent={message.content ?? ''}
+                    onSubmit={(content) => {
+                      setEditingId(null);
+                      onEditMessage(message.id as string, content);
+                    }}
+                    onCancel={() => setEditingId(null)}
+                  />
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                )}
 
-            {message.status === 'pending' && <p className="text-xs opacity-60">envoi…</p>}
-            {message.status === 'failed' && (
-              <p className="text-xs text-red-500">échec — réessayer</p>
-            )}
-          </li>
-        ))}
+                {/*
+                  Seulement sur SES propres messages vivants et acquittes : un
+                  message optimiste n'a pas encore d'`id` serveur a envoyer.
+                */}
+                {message.senderId === meId && message.id !== null && message.deletedAt === null && (
+                  <MessageActions
+                    onEdit={
+                      canStillEdit(message.createdAt, Date.now())
+                        ? () => setEditingId(message.id)
+                        : null
+                    }
+                    onDelete={() => {
+                      if (window.confirm('Supprimer ce message pour tout le monde ?')) {
+                        onDeleteMessage(message.id as string);
+                      }
+                    }}
+                  />
+                )}
+
+                {/*
+                  Uniquement sur SES propres messages acquittes : un message encore
+                  optimiste n'a pas d'`id` serveur, donc aucun watermark ne peut le
+                  designer, et le statut d'un message recu n'a pas de sens ici.
+                */}
+                {message.senderId === meId && message.id !== null && message.deletedAt === null && (
+                  <ReceiptTicks
+                    status={selectStatusFor(receiptsState, conversationId, message.id, meId)}
+                    readCount={
+                      isGroup
+                        ? selectReadCount(receiptsState, conversationId, message.id, meId)
+                        : undefined
+                    }
+                  />
+                )}
+
+                {message.status === 'pending' && <p className="text-xs opacity-60">envoi…</p>}
+                {message.status === 'failed' && (
+                  <p className="text-xs text-red-500">échec — réessayer</p>
+                )}
+              </li>
+            </Fragment>
+          );
+        })}
       </ul>
     </div>
   );
