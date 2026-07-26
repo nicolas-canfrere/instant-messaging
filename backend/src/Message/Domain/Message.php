@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Message\Domain;
 
 use App\Shared\Domain\Event\MessageWasDeleted;
+use App\Shared\Domain\Event\MessageWasEdited;
 use App\Shared\Domain\Event\MessageWasSent;
 use App\Shared\Domain\Event\RecordsEventsTrait;
 use App\Shared\Domain\Identifier\ConversationId;
@@ -14,6 +15,12 @@ use App\Shared\Domain\Identifier\UserId;
 final class Message
 {
     use RecordsEventsTrait;
+
+    /**
+     * Quinze minutes. C'est une regle metier, pas un reglage d'exploitation :
+     * elle vit donc dans l'agregat et non dans la configuration.
+     */
+    public const int EDIT_WINDOW_SECONDS = 900;
 
     private function __construct(
         private readonly MessageId $id,
@@ -137,5 +144,40 @@ final class Message
         $this->deletedAt = $now;
 
         $this->recordEvent(new MessageWasDeleted($this->id, $this->conversationId, $this->senderId, $now));
+    }
+
+    /**
+     * Editer avec le contenu actuel n'enregistre AUCUN evenement — meme
+     * mecanique que le rejeu d'envoi : rien d'enregistre, donc rien de republie,
+     * sans un seul `if` dans le handler.
+     */
+    public function edit(UserId $editor, MessageContent $content, \DateTimeImmutable $now): void
+    {
+        if (!$this->senderId->equals($editor)) {
+            throw NotTheAuthorException::forMessage($this->id);
+        }
+
+        if ($this->isDeleted()) {
+            throw MessageAlreadyDeletedException::forMessage($this->id);
+        }
+
+        if ($now->getTimestamp() - $this->createdAt->getTimestamp() > self::EDIT_WINDOW_SECONDS) {
+            throw EditWindowExpiredException::create();
+        }
+
+        if ($content->toString() === $this->content?->toString()) {
+            return;
+        }
+
+        $this->content = $content;
+        $this->editedAt = $now;
+
+        $this->recordEvent(new MessageWasEdited(
+            $this->id,
+            $this->conversationId,
+            $this->senderId,
+            $content->toString(),
+            $now,
+        ));
     }
 }
