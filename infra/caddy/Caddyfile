@@ -19,6 +19,19 @@
 		reverse_proxy mercure:80
 	}
 
+	# Le stockage objet passe par l'origine unique, comme tout le reste. Caddy
+	# preserve le Host d'origine par defaut : le backend signe donc avec
+	# `localhost:8080`, l'hote que le navigateur appelle vraiment, et la
+	# signature tient. Consequence : le PUT du navigateur est SAME-ORIGIN.
+	# Ni preflight, ni regle CORS sur le bucket, ni entree dans /etc/hosts —
+	# les deux pieges de la note vault disparaissent (spec §5.2).
+	#
+	# Le nom du bucket sert de prefixe de chemin, ce que le path-style endpoint
+	# de MinIO donne deja. Aucune reecriture d'URL, donc aucune signature cassee.
+	handle /messaging-media/* {
+		reverse_proxy minio:9000
+	}
+
 	handle {
 		reverse_proxy frontend:5173
 	}

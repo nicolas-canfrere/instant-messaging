@@ -23,5 +23,41 @@ framework:
                 middleware:
                     - App\Shared\Infrastructure\Bus\LoggingMiddleware
 
+        failure_transport: failed
+
         transports:
             sync: 'sync://'
+
+            # `auto_setup: false` : la file et l'exchange sont declares dans
+            # infra/rabbitmq/definitions.json, charges au boot du hub. La
+            # topologie est versionnee, pas improvisee au premier message.
+            media:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+                options:
+                    auto_setup: false
+                    exchange:
+                        name: 'messaging.media.exchange'
+                    queues:
+                        messaging.media: ~
+
+            # Un echec definitif ne doit pas disparaitre : il atterrit en base,
+            # ou `messenger:failed:show` le retrouve.
+            failed:
+                dsn: 'doctrine://default?table_name=messenger_failed'
+
+        routing:
+            App\Media\Application\Command\ProcessMediaCommand: media
+
+when@test:
+    framework:
+        messenger:
+            transports:
+                # `in-memory` : aucun RabbitMQ n'est necessaire en CI, et
+                # zenstruck/messenger-test peut asserter ce qui part sans
+                # le consommer.
+                media: 'in-memory://'
+                failed: 'in-memory://'
