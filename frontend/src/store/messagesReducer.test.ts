@@ -38,6 +38,27 @@ function at(items: StoredMessage[], index: number): StoredMessage {
   return item;
 }
 
+/**
+ * Fabrique generique pour les tests qui n'ont pas besoin de composer un id
+ * serveur et un client_message_id distincts comme `serverMessage` : un
+ * `StoredMessage` complet, avec des valeurs par defaut plausibles, fusionne
+ * avec les `overrides` fournis par le test.
+ */
+function aMessage(overrides: Partial<StoredMessage> = {}): StoredMessage {
+  return {
+    id: '01J9ZQ7X8K3M4N5P6Q7R8S9TAC',
+    clientMessageId: 'c1',
+    conversationId: 'c1',
+    senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
+    content: 'texte',
+    createdAt: '2026-07-25T10:00:00+00:00',
+    editedAt: null,
+    deletedAt: null,
+    status: 'sent',
+    ...overrides,
+  };
+}
+
 describe('messagesReducer', () => {
   it('ordonne les messages par ULID croissant', () => {
     let state = emptyMessagesState();
@@ -218,5 +239,63 @@ describe('messagesReducer', () => {
     const items = selectThread(state, CONVERSATION).items;
 
     expect(at(items, items.length - 1).status).toBe('pending');
+  });
+});
+
+describe('message/deleted', () => {
+  it('efface le contenu du message vise et le marque supprime', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'a effacer' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/deleted',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      deletedAt: '2026-07-26T11:00:00+00:00',
+    });
+
+    const item = at(selectThread(next, 'c1').items, 0);
+    expect(item.content).toBeNull();
+    expect(item.deletedAt).toBe('2026-07-26T11:00:00+00:00');
+  });
+
+  // Le message n'a jamais ete charge : la page d'historique qui le contiendra
+  // le lira deja a jour. Ne rien faire est le comportement correct.
+  it('ignore un identifiant absent du fil', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'intact' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/deleted',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000Z',
+      deletedAt: '2026-07-26T11:00:00+00:00',
+    });
+
+    expect(at(selectThread(next, 'c1').items, 0).content).toBe('intact');
+  });
+
+  // L'echo SSE arrive avant la reponse du DELETE : appliquer deux fois le meme
+  // etat complet doit donner le meme resultat.
+  it('est idempotent', () => {
+    const base = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'a effacer' }),
+    });
+
+    const action = {
+      type: 'message/deleted' as const,
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      deletedAt: '2026-07-26T11:00:00+00:00',
+    };
+
+    expect(messagesReducer(messagesReducer(base, action), action)).toEqual(
+      messagesReducer(base, action),
+    );
   });
 });

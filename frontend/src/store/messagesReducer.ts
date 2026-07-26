@@ -35,7 +35,8 @@ export type MessagesAction =
   | { type: 'message/optimistic'; message: StoredMessage }
   | { type: 'message/acknowledged'; conversationId: string; clientMessageId: string; serverId: string }
   | { type: 'message/failed'; conversationId: string; clientMessageId: string }
-  | { type: 'message/received'; message: StoredMessage };
+  | { type: 'message/received'; message: StoredMessage }
+  | { type: 'message/deleted'; conversationId: string; id: string; deletedAt: string };
 
 const EMPTY_THREAD: Thread = { items: [], nextBefore: null, loaded: false };
 
@@ -119,6 +120,22 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
         items: thread.items.map((item) =>
           item.clientMessageId === action.clientMessageId
             ? { ...item, status: 'failed' as const }
+            : item,
+        ),
+      }));
+
+    case 'message/deleted':
+      // Applique par `id` SERVEUR : contrairement a l'envoi, il n'y a pas de
+      // passe `client_message_id` a faire — le message est deja persiste, donc
+      // la cle de reconciliation existe.
+      //
+      // Un `id` absent du fil ne declenche rien : le message n'a jamais ete
+      // charge, et la page d'historique qui le contiendra le lira deja a jour.
+      return patchThread(state, action.conversationId, (thread) => ({
+        ...thread,
+        items: thread.items.map((item) =>
+          item.id === action.id
+            ? { ...item, content: null, deletedAt: action.deletedAt }
             : item,
         ),
       }));

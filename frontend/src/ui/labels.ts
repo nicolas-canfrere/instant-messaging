@@ -53,3 +53,10 @@ export function formatListDate(isoDate: string): string {
     ? date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     : date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
+
+/**
+ * Le serveur ne dit jamais « ce message a ete supprime » : il dit qu'il n'y a
+ * plus de charge utile. Le libelle est de la presentation, il vit donc ici — et
+ * pourra etre traduit sans toucher a l'API.
+ */
+export const deletedMessageLabel = 'Ce message a été supprimé';

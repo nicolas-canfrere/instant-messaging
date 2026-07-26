@@ -68,6 +68,7 @@ describe('ConversationView', () => {
       receiptsState: emptyReceiptsState(),
       onLoadOlder: vi.fn(),
       onSend: vi.fn(async () => {}),
+      onDeleteMessage: vi.fn(),
       onTyping: vi.fn(),
     };
 

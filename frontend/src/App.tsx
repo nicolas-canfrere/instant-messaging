@@ -69,6 +69,7 @@ function Workspace({ me }: { me: Me }) {
     selectConversation,
     loadOlder,
     send,
+    deleteMessage,
     createDirect,
     createGroup,
   } = useAppState(me);
@@ -106,6 +107,12 @@ function Workspace({ me }: { me: Me }) {
           receiptsState={receiptsState}
           onLoadOlder={loadOlder}
           onSend={(content) => send(selected.id, content)}
+          // Pas d'`await` ici : la suppression est declenchee depuis un
+          // `onClick`, qui ne peut pas attendre une promesse. L'echo SSE
+          // (idempotent) met a jour l'affichage quand la reponse arrive.
+          onDeleteMessage={(messageId) => {
+            void deleteMessage(selected.id, messageId);
+          }}
           onTyping={() => notifyTyping(selected.id)}
         />
       )}

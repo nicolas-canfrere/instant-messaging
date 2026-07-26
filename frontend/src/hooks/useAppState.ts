@@ -54,6 +54,7 @@ const NAMED_EVENTS = [
   'membership.changed',
   'typing.started',
   'receipt.updated',
+  'message.deleted',
 ];
 
 /**
@@ -185,6 +186,7 @@ export type AppState = {
   loadOlder: () => void;
   refreshConversations: () => Promise<void>;
   send: (conversationId: string, content: string) => Promise<void>;
+  deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
   createDirect: (peerId: string) => Promise<void>;
   createGroup: (title: string, memberIds: string[]) => Promise<void>;
 };
@@ -315,6 +317,15 @@ export function useAppState(me: Me): AppState {
       }
     },
     [me.id],
+  );
+
+  const deleteMessage = useCallback(
+    async (conversationId: string, messageId: string) => {
+      await api.deleteMessage(conversationId, messageId);
+      // Pas de dispatch ici : l'echo SSE pose l'etat, et il est idempotent.
+      // Si le hub est injoignable, le rechargement de l'historique corrigera.
+    },
+    [],
   );
 
   /**
@@ -491,6 +502,20 @@ export function useAppState(me: Me): AppState {
           return;
         }
 
+        if (event.type === 'message.deleted') {
+          dispatch({
+            type: 'message/deleted',
+            conversationId: readString(event.payload, 'conversation_id'),
+            id: readString(event.payload, 'id'),
+            deletedAt: readString(event.payload, 'deleted_at'),
+          });
+
+          // L'apercu de la colonne de gauche a change lui aussi.
+          scheduleConversationsRefresh();
+
+          return;
+        }
+
         if (event.type === 'receipt.updated') {
           dispatchReceipts({
             type: 'receipt/updated',
@@ -584,6 +609,7 @@ export function useAppState(me: Me): AppState {
     loadOlder,
     refreshConversations,
     send,
+    deleteMessage,
     createDirect,
     createGroup,
   };

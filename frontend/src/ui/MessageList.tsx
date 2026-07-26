@@ -6,7 +6,8 @@ import {
   selectStatusFor,
   type ReceiptsState,
 } from '../store/receiptsReducer';
-import { formatTime, userName } from './labels';
+import { deletedMessageLabel, formatTime, userName } from './labels';
+import { MessageActions } from './MessageActions';
 import { ReceiptTicks } from './ReceiptTicks';
 import { useScrollAnchor } from './useScrollAnchor';
 
@@ -25,6 +26,7 @@ type Props = {
   /** En groupe seulement, on affiche « lu par N » : en direct, la coche bleue suffit. */
   isGroup: boolean;
   onLoadOlder: () => void;
+  onDeleteMessage: (messageId: string) => void;
 };
 
 /**
@@ -41,6 +43,7 @@ export function MessageList({
   receiptsState,
   isGroup,
   onLoadOlder,
+  onDeleteMessage,
 }: Props) {
   const container = useRef<HTMLDivElement | null>(null);
   /** L'utilisateur suivait-il le bas du fil juste avant ce rendu ? En ref : ne doit pas re-rendre. */
@@ -101,21 +104,39 @@ export function MessageList({
           // `id` ferait remonter le composant a l'acquittement.
           <li
             key={message.clientMessageId}
-            className={`max-w-[75%] rounded px-3 py-2 ${
+            className={`relative group max-w-[75%] rounded px-3 py-2 ${
               message.senderId === meId ? 'self-end bg-slate-900 text-white' : 'bg-white text-slate-900'
             } ${message.status === 'failed' ? 'opacity-70 ring-1 ring-red-400' : ''}`}
           >
             <p className="text-xs opacity-60">
               {userName(users, message.senderId)} · {formatTime(message.createdAt)}
             </p>
-            <p className="whitespace-pre-wrap break-words">{message.content ?? ''}</p>
+            {message.deletedAt !== null ? (
+              <p className="italic opacity-60">{deletedMessageLabel}</p>
+            ) : (
+              <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            )}
+
+            {/*
+              Seulement sur SES propres messages vivants et acquittes : un
+              message optimiste n'a pas encore d'`id` serveur a envoyer.
+            */}
+            {message.senderId === meId && message.id !== null && message.deletedAt === null && (
+              <MessageActions
+                onDelete={() => {
+                  if (window.confirm('Supprimer ce message pour tout le monde ?')) {
+                    onDeleteMessage(message.id as string);
+                  }
+                }}
+              />
+            )}
 
             {/*
               Uniquement sur SES propres messages acquittes : un message encore
               optimiste n'a pas d'`id` serveur, donc aucun watermark ne peut le
               designer, et le statut d'un message recu n'a pas de sens ici.
             */}
-            {message.senderId === meId && message.id !== null && (
+            {message.senderId === meId && message.id !== null && message.deletedAt === null && (
               <ReceiptTicks
                 status={selectStatusFor(receiptsState, conversationId, message.id, meId)}
                 readCount={
