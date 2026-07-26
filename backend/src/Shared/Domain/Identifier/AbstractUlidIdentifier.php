@@ -25,8 +25,14 @@ abstract class AbstractUlidIdentifier implements \Stringable
      * Forme delimitee et ancree du motif, consommee par les contraintes de
      * validation des charges utiles et par le constructeur. C'est ici, et
      * nulle part ailleurs, que le format est defini.
+     *
+     * `\A` et `\z` plutot que `^` et `$` : `$` accepte un saut de ligne final,
+     * si bien qu'un ULID suivi d'un `\n` passait la validation avant de casser
+     * sur la colonne CHAR(26) — un 500 la ou l'entree meritait un 422.
+     * `ROUTE_PATTERN`, lui, n'a pas ce besoin : Symfony compile les
+     * `requirements:` de route avec le modificateur `D`.
      */
-    public const string PATTERN = '/^' . self::ROUTE_PATTERN . '$/';
+    public const string PATTERN = '/\A' . self::ROUTE_PATTERN . '\z/';
 
     /** @var non-empty-string */
     private readonly string $value;

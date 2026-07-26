@@ -30,6 +30,10 @@ final class UlidIdentifierTest extends TestCase
         yield 'minuscules' => ['01j9zq7x8k3m4n5p6q7r8s9tab'];
         yield 'premier caractere > 7' => ['81J9ZQ7X8K3M4N5P6Q7R8S9TAB'];
         yield 'vide' => [''];
+        // `$` accepte une derniere ligne vide : sans ancrage strict, ce ULID
+        // suivi d'un saut de ligne passait la validation, puis cassait sur la
+        // colonne CHAR(26) — un 500 la ou l'entree meritait un 422.
+        yield 'saut de ligne final' => ["01J9ZQ7X8K3M4N5P6Q7R8S9TAB\n"];
     }
 
     #[DataProvider('invalidValues')]
