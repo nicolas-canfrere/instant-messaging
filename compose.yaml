@@ -166,9 +166,17 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      minio-create-bucket:
+        condition: service_completed_successfully
     entrypoint: []
     command: ["php", "bin/console", "messenger:consume", "media", "--time-limit=3600", "-v"]
     restart: unless-stopped
+    # L'image herite du HEALTHCHECK de FrankenPHP (curl vers l'API d'admin
+    # Caddy, port 2019) : ce conteneur ne lance jamais Caddy, seulement la
+    # commande ci-dessus. Sans ce `disable`, `--wait` finirait par le voir
+    # "unhealthy" alors que le worker consomme normalement.
+    healthcheck:
+      disable: true
 
   postgres:
     image: postgres:17-alpine
