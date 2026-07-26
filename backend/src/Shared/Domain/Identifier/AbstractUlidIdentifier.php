@@ -20,7 +20,10 @@ abstract class AbstractUlidIdentifier implements \Stringable
      * Publique parce que les contraintes de validation des charges utiles s'y
      * referent : c'est LA definition du format, elle ne doit exister qu'ici.
      */
-    public const string PATTERN = '/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/';
+    /** Motif nu, sans delimiteurs : utilisable en `requirements` de route. */
+    public const string ROUTE_PATTERN = '[0-7][0-9A-HJKMNP-TV-Z]{25}';
+
+    public const string PATTERN = '/^' . self::ROUTE_PATTERN . '$/';
 
     /** @var non-empty-string */
     private readonly string $value;
