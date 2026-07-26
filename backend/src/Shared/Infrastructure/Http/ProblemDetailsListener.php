@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Shared\Infrastructure\Http;
 
+use App\Shared\Domain\Exception\ConflictExceptionInterface;
 use App\Shared\Domain\Exception\ForbiddenExceptionInterface;
 use App\Shared\Domain\Exception\InvalidInputExceptionInterface;
 use App\Shared\Domain\Exception\NotFoundExceptionInterface;
@@ -125,6 +126,12 @@ final readonly class ProblemDetailsListener
             // de l'exception, le statut et la forme d'URI restent decides ici.
             $throwable instanceof ForbiddenExceptionInterface => [
                 Response::HTTP_FORBIDDEN,
+                sprintf('/problems/%s', $throwable->problemSlug()),
+                $throwable->problemTitle(),
+                $throwable->getMessage(),
+            ],
+            $throwable instanceof ConflictExceptionInterface => [
+                Response::HTTP_CONFLICT,
                 sprintf('/problems/%s', $throwable->problemSlug()),
                 $throwable->problemTitle(),
                 $throwable->getMessage(),
