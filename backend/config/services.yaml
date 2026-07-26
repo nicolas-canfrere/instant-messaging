@@ -67,6 +67,40 @@ services:
     App\Message\Application\Query\MessagePageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessagePageReader'
     App\Shared\Application\Bus\CommandDispatcherInterface: '@App\Shared\Infrastructure\Bus\CommandDispatcher'
     App\Media\Domain\MediaRepositoryInterface: '@App\Media\Infrastructure\Persistence\DbalMediaRepository'
+    App\Media\Application\Query\UploadTicketReaderInterface: '@App\Media\Infrastructure\Persistence\DbalUploadTicketReader'
+    App\Media\Application\MediaStorageInterface: '@App\Media\Infrastructure\Storage\S3MediaStorage'
+
+    # Deux clients S3, deux endpoints. Le signeur ne sert QU'A signer : il ne
+    # doit jamais emettre de requete, `localhost:8080` n'etant pas joignable
+    # depuis le conteneur backend. Le jour d'un vrai S3, seul
+    # `use_path_style_endpoint` disparait.
+    media.s3.internal:
+        class: Aws\S3\S3Client
+        arguments:
+            - version: 'latest'
+              region: 'us-east-1'
+              endpoint: '%env(MEDIA_S3_INTERNAL_ENDPOINT)%'
+              use_path_style_endpoint: true
+              credentials:
+                  key: '%env(MEDIA_S3_KEY)%'
+                  secret: '%env(MEDIA_S3_SECRET)%'
+
+    media.s3.signer:
+        class: Aws\S3\S3Client
+        arguments:
+            - version: 'latest'
+              region: 'us-east-1'
+              endpoint: '%env(MEDIA_S3_PUBLIC_ENDPOINT)%'
+              use_path_style_endpoint: true
+              credentials:
+                  key: '%env(MEDIA_S3_KEY)%'
+                  secret: '%env(MEDIA_S3_SECRET)%'
+
+    App\Media\Infrastructure\Storage\S3MediaStorage:
+        arguments:
+            $internalClient: '@media.s3.internal'
+            $signerClient: '@media.s3.signer'
+            $bucket: '%env(MEDIA_BUCKET)%'
 
     # Le meme convertisseur que celui du serialiseur, pour que les chemins de
     # violation sortent en snake_case comme le reste de l'API.
