@@ -76,6 +76,7 @@ services:
     App\Media\Domain\MediaRepositoryInterface: '@App\Media\Infrastructure\Persistence\DbalMediaRepository'
     App\Media\Application\Query\UploadTicketReaderInterface: '@App\Media\Infrastructure\Persistence\DbalUploadTicketReader'
     App\Media\Application\MediaStorageInterface: '@App\Media\Infrastructure\Storage\S3MediaStorage'
+    App\Media\Application\ImageInspectorInterface: '@App\Media\Infrastructure\Image\GdImageInspector'
 
     # Deux clients S3, deux endpoints. Le signeur ne sert QU'A signer : il ne
     # doit jamais emettre de requete, `localhost:8080` n'etant pas joignable
