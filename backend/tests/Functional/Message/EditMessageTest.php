@@ -214,10 +214,13 @@ final class EditMessageTest extends DatabaseTestCase
     }
 
     /**
-     * Carol n'est pas membre du direct alice/bob — `secondConversationId()` le
-     * rend, `firstConversationId()` rendant le groupe dont elle fait partie. Un
-     * non-membre recoit 404 et non 403 : un 403 confirmerait l'existence de la
+     * Un non-membre recoit 404 et non 403 : un 403 confirmerait l'existence de la
      * conversation.
+     *
+     * Le test choisit une conversation d'alice par `secondConversationId()`, puis
+     * VERIFIE que carol n'en est pas membre avant d'exercer le 404 — sans quoi la
+     * validite du test reposerait sur l'ordre des fixtures, une precondition
+     * implicite qu'un ajout de fixture pourrait invalider en silence.
      */
     public function testANonMemberGetsNotFound(): void
     {
@@ -226,6 +229,12 @@ final class EditMessageTest extends DatabaseTestCase
         $messageId = $this->send($conversationId, self::CLIENT_ID, 'entre nous');
 
         $this->login('carol');
+        self::assertNotContains(
+            $conversationId,
+            $this->visibleConversationIds(),
+            'Precondition : carol ne doit pas etre membre de la conversation exercee.',
+        );
+
         $this->edit($conversationId, $messageId, 'indiscret');
 
         self::assertResponseStatusCodeSame(404);
@@ -253,6 +262,28 @@ final class EditMessageTest extends DatabaseTestCase
 
         self::assertSame($unknown['type'], $wrongConversation['type']);
         self::assertSame($unknown['title'], $wrongConversation['title']);
+    }
+
+    /**
+     * Identifiants des conversations visibles par l'utilisateur connecte : la
+     * liste ne rend que celles dont il est membre, c'est donc la lecture la plus
+     * directe de l'appartenance depuis un test fonctionnel.
+     *
+     * @return list<string>
+     */
+    private function visibleConversationIds(): array
+    {
+        $this->client->request('GET', '/api/conversations');
+
+        /** @var list<array{id: string}> $conversations */
+        $conversations = json_decode(
+            (string) $this->client->getResponse()->getContent(),
+            true,
+            512,
+            \JSON_THROW_ON_ERROR,
+        );
+
+        return array_column($conversations, 'id');
     }
 
     private function clock(): MockClock
