@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from './api/client';
+import { ProblemError } from './api/problem';
 import type { Me } from './api/types';
 import { useAppState } from './hooks/useAppState';
 import { selectThread } from './store/messagesReducer';
@@ -108,10 +109,19 @@ function Workspace({ me }: { me: Me }) {
           onLoadOlder={loadOlder}
           onSend={(content) => send(selected.id, content)}
           // Pas d'`await` ici : la suppression est declenchee depuis un
-          // `onClick`, qui ne peut pas attendre une promesse. L'echo SSE
-          // (idempotent) met a jour l'affichage quand la reponse arrive.
+          // `onClick`, qui ne peut pas attendre une promesse. Mais contrairement
+          // a l'ACK de livraison (qui se rattrape au message suivant, voir
+          // `api.receipts` dans `useAppState`), une suppression est une action
+          // EXPLICITE de l'utilisateur : un echec avale en silence le laisserait
+          // croire que son message a disparu pour tout le monde alors que ce
+          // n'est pas le cas. On l'avertit donc via une alerte plutot que
+          // d'ignorer le rejet.
           onDeleteMessage={(messageId) => {
-            void deleteMessage(selected.id, messageId);
+            void deleteMessage(selected.id, messageId).catch((cause: unknown) => {
+              window.alert(
+                cause instanceof ProblemError ? cause.detail : 'Suppression impossible.',
+              );
+            });
           }}
           onTyping={() => notifyTyping(selected.id)}
         />
