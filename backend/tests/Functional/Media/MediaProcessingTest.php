@@ -33,12 +33,27 @@ final class MediaProcessingTest extends KernelTestCase
         self::assertSame(MediaMimeType::Jpeg, $media->mimeType());
         self::assertSame(1600, $media->width());
         self::assertNotNull($media->thumbnailKey());
-        // La miniature existe REELLEMENT dans le bucket, elle n'est pas
-        // seulement enregistree en base.
-        self::assertNotNull($this->storage()->downloadToTemporaryFile($media->thumbnailKey()));
+        $this->assertThumbnailIsAReal400PxJpeg($media->thumbnailKey());
     }
 
-    public function testAPhpFileRenamedJpgIsRejectedAndItsBytesAreDestroyed(): void
+    public function testAPngOriginalStillProducesAJpegThumbnail(): void
+    {
+        // C'est la raison d'etre de StorageKey::forThumbnail() : le worker
+        // choisit toujours JPEG pour la miniature, quel que soit le format de
+        // l'original. `valide.png` est la seule fixture qui le met a
+        // l'epreuve.
+        $mediaId = $this->uploaded('valide.png', MediaMimeType::Png);
+
+        $this->process($mediaId);
+
+        $media = $this->repository()->ofId($mediaId);
+        self::assertSame(MediaStatus::Ready, $media->status());
+        self::assertSame(MediaMimeType::Png, $media->mimeType());
+        self::assertNotNull($media->thumbnailKey());
+        $this->assertThumbnailIsAReal400PxJpeg($media->thumbnailKey());
+    }
+
+    public function testAPhpFileRenamedJpgIsRejectedAsUnsupportedTypeAndItsBytesAreDestroyed(): void
     {
         $mediaId = $this->uploaded('piege.jpg', MediaMimeType::Jpeg);
 
@@ -48,6 +63,22 @@ final class MediaProcessingTest extends KernelTestCase
         self::assertSame(MediaStatus::Rejected, $media->status());
         self::assertSame(MediaRejectionReason::UnsupportedType, $media->rejectionReason());
         // On ne conserve pas les octets d'un fichier qu'on ne servira jamais.
+        self::assertNull($this->storage()->downloadToTemporaryFile($media->storageKey()));
+    }
+
+    public function testATruncatedFileIsRejectedAsUndecodableRatherThanUnsupportedType(): void
+    {
+        // `tronque.gif` porte une vraie signature PNG tronquee : le type est
+        // dans l'allowlist, seul le decodage echoue. Une confusion avec
+        // UnsupportedType enverrait l'operateur corriger le mauvais probleme
+        // — c'est cette distinction que ce test verifie de bout en bout, worker compris.
+        $mediaId = $this->uploaded('tronque.gif', MediaMimeType::Gif);
+
+        $this->process($mediaId);
+
+        $media = $this->repository()->ofId($mediaId);
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::Undecodable, $media->rejectionReason());
         self::assertNull($this->storage()->downloadToTemporaryFile($media->storageKey()));
     }
 
@@ -70,11 +101,55 @@ final class MediaProcessingTest extends KernelTestCase
         self::assertSame(MediaRejectionReason::MissingObject, $this->repository()->ofId($mediaId)->rejectionReason());
     }
 
-    /** Depose reellement le fichier dans MinIO, puis rend l'identifiant. */
-    private function uploaded(string $fixture, MediaMimeType $declared): MediaId
+    public function testRedeliveringTheMessageForAnAlreadyReadyMediaLeavesItUntouched(): void
+    {
+        // Seed distinct de celui de testAValidImageBecomesReadyWithAThumbnail :
+        // les deux tests partagent la meme fixture mais doivent produire des
+        // ULID distincts, sinon la seconde insertion viole la cle primaire.
+        $mediaId = $this->uploaded('valide.jpg', MediaMimeType::Jpeg, idSeed: 'valide.jpg-redelivery');
+
+        $this->process($mediaId);
+        $ready = $this->repository()->ofId($mediaId);
+        self::assertSame(MediaStatus::Ready, $ready->status());
+        $thumbnailKeyAfterFirstProcessing = $ready->thumbnailKey();
+
+        // Un redelivrage Messenger (au-moins-une-fois) sur un media deja
+        // terminal ne doit rien rejouer : le garde-fou du handler doit
+        // sortir avant tout acces au stockage.
+        $this->process($mediaId);
+
+        $stillReady = $this->repository()->ofId($mediaId);
+        self::assertSame(MediaStatus::Ready, $stillReady->status());
+        self::assertSame((string) $thumbnailKeyAfterFirstProcessing, (string) $stillReady->thumbnailKey());
+        self::assertSame(1600, $stillReady->width());
+    }
+
+    /** Verifie la miniature dans le bucket : dimensions ET format reels, pas seulement sa presence. */
+    private function assertThumbnailIsAReal400PxJpeg(StorageKey $thumbnailKey): void
+    {
+        $thumbnailPath = $this->storage()->downloadToTemporaryFile($thumbnailKey);
+        self::assertNotNull($thumbnailPath);
+
+        $size = getimagesize($thumbnailPath);
+        @unlink($thumbnailPath);
+
+        self::assertIsArray($size);
+        self::assertSame(IMAGETYPE_JPEG, $size[2]);
+        self::assertSame(400, $size[0]);
+        self::assertSame(225, $size[1]);
+    }
+
+    /**
+     * Depose reellement le fichier dans MinIO, puis rend l'identifiant.
+     *
+     * `$idSeed` : par defaut `$fixture` lui-meme. A fournir explicitement
+     * quand deux tests reutilisent la meme fixture — sinon l'ULID derive de
+     * `crc32()` collide, et la seconde insertion viole la cle primaire.
+     */
+    private function uploaded(string $fixture, MediaMimeType $declared, ?string $idSeed = null): MediaId
     {
         self::bootKernel();
-        $mediaId = MediaId::fromString(sprintf('01JQZ0000000000000000%05d', crc32($fixture) % 100_000));
+        $mediaId = MediaId::fromString(sprintf('01JQZ0000000000000000%05d', crc32($idSeed ?? $fixture) % 100_000));
         $key = StorageKey::forOriginal($mediaId, $declared);
 
         $media = MediaObject::request(
@@ -102,6 +177,16 @@ final class MediaProcessingTest extends KernelTestCase
      * message est route vers un transport. C'est le worker (conteneur
      * separe) qui consomme la vraie file ; ici on declenche le handler « a
      * la main », comme le prevoit ce test.
+     *
+     * Consequence a connaitre pour la suite : cet appel direct CONTOURNE
+     * `TransactionalMiddleware`, seul composant qui publie les domain events
+     * collectes par l'agregat une fois la transaction commitee. Rien dans ce
+     * fichier ne prouve donc que `MediaWasProcessed` est reellement publie —
+     * seul le nouvel etat de l'agregat (statut, motif, cle de miniature) est
+     * verifie ici. La tache 8, qui construit la choregraphie sur cet
+     * evenement, doit couvrir sa publication par un autre chemin (test qui
+     * passe par le vrai `command.bus` + `TransactionalMiddleware`, ou test
+     * dedie de ce middleware).
      */
     private function process(MediaId $mediaId): void
     {
