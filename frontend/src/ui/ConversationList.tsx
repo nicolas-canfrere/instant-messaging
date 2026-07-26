@@ -1,4 +1,5 @@
 import type { ConversationSummary, UserSummary } from '../api/types';
+import { viewerLocale, viewerTimeZone } from './dates';
 import { conversationTitle, formatListDate } from './labels';
 import { PresenceDot } from './PresenceDot';
 
@@ -27,6 +28,12 @@ export function ConversationList({
   onSelect,
   onNewConversation,
 }: Props) {
+  // Resolus une fois par rendu de liste plutot qu'a chaque conversation : ces
+  // appels Intl ne sont pas gratuits, et la valeur ne change pas en cours de
+  // session.
+  const timeZone = viewerTimeZone();
+  const locale = viewerLocale();
+
   return (
     <nav className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white">
       <div className="flex items-center justify-between px-4 py-3">
@@ -80,7 +87,9 @@ export function ConversationList({
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1 text-xs text-slate-400">
-                    {conversation.last_message_at ? formatListDate(conversation.last_message_at) : ''}
+                    {conversation.last_message_at
+                      ? formatListDate(conversation.last_message_at, timeZone, locale)
+                      : ''}
 
                     {conversation.unread_count > 0 && (
                       <span

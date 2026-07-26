@@ -8,3 +8,25 @@ services:
 
     App\Realtime\Domain\EventPublisherInterface:
         alias: App\Tests\Support\InMemoryEventPublisher
+
+    # Horloge substituable. `MockClock` est GELEE : le temps n'avance que si un
+    # test appelle `sleep()`. C'est le seul moyen de faire vieillir un message
+    # de plus de quinze minutes pour verifier, jusqu'au statut HTTP et au `type`
+    # du catalogue, que la fenetre d'edition est bien tenue — l'unitaire couvre
+    # l'invariant de l'agregat, pas sa traduction en 403.
+    #
+    # `autowire` n'est pas active dans ce fichier : `MockClock` est donc
+    # construite avec ses arguments par defaut, c'est-a-dire gelee sur l'instant
+    # du boot du conteneur.
+    #
+    # Deux effets de bord a connaitre avant d'ecrire un test. Tous les `created_at`
+    # produits dans un meme test partagent l'instant du boot : l'ordre des messages
+    # ne tient donc que par l'ULID, genere hors horloge — n'attendez pas d'un
+    # `created_at` qu'il distingue deux envois. Et `LoggingMiddleware` mesure une
+    # duree systematiquement nulle, ce qui rend inassertionnable tout ce qui
+    # porterait sur un temps d'execution.
+    Symfony\Component\Clock\MockClock:
+        public: true
+
+    Psr\Clock\ClockInterface:
+        alias: Symfony\Component\Clock\MockClock

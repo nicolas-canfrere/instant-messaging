@@ -95,4 +95,81 @@ abstract class DatabaseTestCase extends WebTestCase
 
         return $decoded;
     }
+
+    /** Premiere conversation de l'utilisateur connecte, dans l'ordre rendu par l'API. */
+    protected function firstConversationId(): string
+    {
+        return $this->conversations()[0]['id'];
+    }
+
+    /**
+     * Deuxieme conversation de l'utilisateur connecte, distincte de la premiere.
+     * Les fixtures en offrent deux pour alice (direct et groupe) ; a defaut,
+     * on en cree une pour ne pas dependre d'un jeu de donnees particulier.
+     */
+    protected function secondConversationId(): string
+    {
+        $conversations = $this->conversations();
+
+        if (isset($conversations[1])) {
+            return $conversations[1]['id'];
+        }
+
+        $this->client->request(
+            'POST',
+            '/api/conversations',
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(
+                ['type' => 'group', 'title' => 'Autre conversation', 'member_ids' => []],
+                \JSON_THROW_ON_ERROR,
+            ),
+        );
+
+        self::assertResponseStatusCodeSame(201);
+
+        /** @var array{id: string} $created */
+        $created = $this->json();
+
+        return $created['id'];
+    }
+
+    /** Envoie un message et rend l'identifiant serveur du message cree (ou rejoue). */
+    protected function send(string $conversationId, string $clientMessageId, string $content): string
+    {
+        $this->client->request(
+            'POST',
+            sprintf('/api/conversations/%s/messages', $conversationId),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(
+                ['client_message_id' => $clientMessageId, 'content' => $content],
+                \JSON_THROW_ON_ERROR,
+            ),
+        );
+
+        /** @var array{id?: string} $decoded */
+        $decoded = json_decode(
+            (string) $this->client->getResponse()->getContent(),
+            true,
+            512,
+            \JSON_THROW_ON_ERROR,
+        );
+
+        return $decoded['id'] ?? '';
+    }
+
+    /** @return list<array{id: string, type: string, last_message_preview: string|null, last_message_at: string|null}> */
+    private function conversations(): array
+    {
+        $this->client->request('GET', '/api/conversations');
+
+        /** @var list<array{id: string, type: string, last_message_preview: string|null, last_message_at: string|null}> $body */
+        $body = json_decode(
+            (string) $this->client->getResponse()->getContent(),
+            true,
+            512,
+            \JSON_THROW_ON_ERROR,
+        );
+
+        return $body;
+    }
 }

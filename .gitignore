@@ -4,3 +4,7 @@ node_modules/
 
 # Secrets locaux de docker compose (voir .env.example)
 /.env
+
+# Brouillons de travail des agents : ledger d'execution, briefs, rapports,
+# paquets de revue. Jetables — le depot fait foi.
+/.superpowers/

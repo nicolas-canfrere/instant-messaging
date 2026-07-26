@@ -16,6 +16,8 @@ function serverMessage(id: string, clientMessageId: string, content = 'texte'): 
     senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
     content,
     createdAt: '2026-07-25T10:00:00+00:00',
+    editedAt: null,
+    deletedAt: null,
     status: 'sent',
   };
 }
@@ -34,6 +36,27 @@ function at(items: StoredMessage[], index: number): StoredMessage {
   }
 
   return item;
+}
+
+/**
+ * Fabrique generique pour les tests qui n'ont pas besoin de composer un id
+ * serveur et un client_message_id distincts comme `serverMessage` : un
+ * `StoredMessage` complet, avec des valeurs par defaut plausibles, fusionne
+ * avec les `overrides` fournis par le test.
+ */
+function aMessage(overrides: Partial<StoredMessage> = {}): StoredMessage {
+  return {
+    id: '01J9ZQ7X8K3M4N5P6Q7R8S9TAC',
+    clientMessageId: 'c1',
+    conversationId: 'c1',
+    senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
+    content: 'texte',
+    createdAt: '2026-07-25T10:00:00+00:00',
+    editedAt: null,
+    deletedAt: null,
+    status: 'sent',
+    ...overrides,
+  };
 }
 
 describe('messagesReducer', () => {
@@ -77,6 +100,8 @@ describe('messagesReducer', () => {
         senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
         content: 'bonjour',
         createdAt: '2026-07-25T10:00:00+00:00',
+        editedAt: null,
+        deletedAt: null,
         status: 'pending',
       },
     });
@@ -108,6 +133,8 @@ describe('messagesReducer', () => {
         senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
         content: 'bonjour',
         createdAt: '2026-07-25T10:00:00+00:00',
+        editedAt: null,
+        deletedAt: null,
         status: 'pending',
       },
     });
@@ -170,6 +197,8 @@ describe('messagesReducer', () => {
         senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
         content: 'bonjour',
         createdAt: '2026-07-25T10:00:00+00:00',
+        editedAt: null,
+        deletedAt: null,
         status: 'pending',
       },
     });
@@ -197,6 +226,8 @@ describe('messagesReducer', () => {
         senderId: '01J9ZQ7X8K3M4N5P6Q7R8S9TAB',
         content: 'en attente',
         createdAt: '2026-07-25T10:00:00+00:00',
+        editedAt: null,
+        deletedAt: null,
         status: 'pending',
       },
     });
@@ -208,5 +239,179 @@ describe('messagesReducer', () => {
     const items = selectThread(state, CONVERSATION).items;
 
     expect(at(items, items.length - 1).status).toBe('pending');
+  });
+});
+
+describe('message/deleted', () => {
+  it('efface le contenu du message vise et le marque supprime', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'a effacer' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/deleted',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      deletedAt: '2026-07-26T11:00:00+00:00',
+    });
+
+    const item = at(selectThread(next, 'c1').items, 0);
+    expect(item.content).toBeNull();
+    expect(item.deletedAt).toBe('2026-07-26T11:00:00+00:00');
+  });
+
+  // Le message n'a jamais ete charge : la page d'historique qui le contiendra
+  // le lira deja a jour. Ne rien faire est le comportement correct.
+  it('ignore un identifiant absent du fil', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'intact' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/deleted',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000Z',
+      deletedAt: '2026-07-26T11:00:00+00:00',
+    });
+
+    expect(at(selectThread(next, 'c1').items, 0).content).toBe('intact');
+  });
+
+  // L'echo SSE arrive avant la reponse du DELETE : appliquer deux fois le meme
+  // etat complet doit donner le meme resultat.
+  it('est idempotent', () => {
+    const base = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'a effacer' }),
+    });
+
+    const action = {
+      type: 'message/deleted' as const,
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      deletedAt: '2026-07-26T11:00:00+00:00',
+    };
+
+    expect(messagesReducer(messagesReducer(base, action), action)).toEqual(
+      messagesReducer(base, action),
+    );
+  });
+});
+
+describe('message/edited', () => {
+  it('remplace le contenu et marque l instant d edition', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'bonjor' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/edited',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      content: 'bonjour',
+      editedAt: '2026-07-26T09:05:00+00:00',
+    });
+
+    const item = at(selectThread(next, 'c1').items, 0);
+    expect(item.content).toBe('bonjour');
+    expect(item.editedAt).toBe('2026-07-26T09:05:00+00:00');
+  });
+
+  /**
+   * Le serveur dit la verite, le front la transporte telle quelle. Un `PATCH`
+   * sans modification est un no-op cote agregat : la vue revient avec
+   * `edited_at: null`, et ce `null` doit arriver intact jusqu'au message. Le
+   * reduire a la chaine vide afficherait « · modifie » sur un message jamais
+   * modifie, `MessageList` testant `editedAt !== null`.
+   */
+  it('transporte un editedAt nul sans le transformer en chaine vide', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'bonjour' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/edited',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      content: 'bonjour',
+      editedAt: null,
+    });
+
+    expect(at(selectThread(next, 'c1').items, 0).editedAt).toBeNull();
+  });
+
+  it('ignore un identifiant absent du fil', () => {
+    const state = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'intact' }),
+    });
+
+    const next = messagesReducer(state, {
+      type: 'message/edited',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000Z',
+      content: 'ailleurs',
+      editedAt: '2026-07-26T09:05:00+00:00',
+    });
+
+    expect(at(selectThread(next, 'c1').items, 0).content).toBe('intact');
+  });
+
+  /**
+   * SSE ne garantit aucun ordre entre deux evenements distincts : un echo
+   * d'edition peut arriver APRES un echo de suppression. La retractation est
+   * definitive — le message doit rester un tombstone, sans quoi l'etat du store
+   * contredirait « record soft, payload hard » (le rendu, lui, masquait le
+   * probleme : la branche tombstone passe avant).
+   */
+  it('laisse intact un message deja supprime', () => {
+    const received = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'bonjour' }),
+    });
+
+    const deleted = messagesReducer(received, {
+      type: 'message/deleted',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      deletedAt: '2026-07-26T09:10:00+00:00',
+    });
+
+    const next = messagesReducer(deleted, {
+      type: 'message/edited',
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      content: 'ressuscite',
+      editedAt: '2026-07-26T09:05:00+00:00',
+    });
+
+    const item = at(selectThread(next, 'c1').items, 0);
+    expect(item.content).toBeNull();
+    expect(item.deletedAt).toBe('2026-07-26T09:10:00+00:00');
+  });
+
+  // L'echo SSE et la reponse du PATCH portent le MEME etat final : les
+  // appliquer dans n'importe quel ordre doit donner le meme resultat.
+  it('donne le meme resultat quel que soit l ordre d arrivee', () => {
+    const base = messagesReducer(emptyMessagesState(), {
+      type: 'message/received',
+      message: aMessage({ id: '01J0000000000000000000000A', content: 'bonjor' }),
+    });
+
+    const action = {
+      type: 'message/edited' as const,
+      conversationId: 'c1',
+      id: '01J0000000000000000000000A',
+      content: 'bonjour',
+      editedAt: '2026-07-26T09:05:00+00:00',
+    };
+
+    expect(messagesReducer(messagesReducer(base, action), action)).toEqual(
+      messagesReducer(base, action),
+    );
   });
 });

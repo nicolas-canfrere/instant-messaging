@@ -78,7 +78,11 @@ final readonly class SendMessageCommandHandler implements CommandHandlerInterfac
 
         // Meme cle, contenu different : signe d'un bug ou d'un abus cote client.
         // Le premier message est conserve, et l'anomalie est signalee.
-        if ($existing->content()->toString() !== $command->content->toString()) {
+        //
+        // Un tombstone n'a plus de contenu : `?->` rend alors `null`, qui ne
+        // peut egaler la chaine entrante. Un rejeu sur un message supprime est
+        // donc signale comme un contenu different, ce qui est exact.
+        if ($existing->content()?->toString() !== $command->content->toString()) {
             $this->logger->warning(
                 'Rejeu de {client_message_id} avec un contenu different : le premier message est conserve',
                 [

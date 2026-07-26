@@ -93,6 +93,17 @@ export const api = {
         read_up_to: watermarks.readUpTo,
       }),
     }),
+
+  deleteMessage: (conversationId: string, messageId: string) =>
+    request<void>(`/api/conversations/${conversationId}/messages/${messageId}`, {
+      method: 'DELETE',
+    }),
+
+  editMessage: (conversationId: string, messageId: string, content: string) =>
+    request<ApiMessage>(`/api/conversations/${conversationId}/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    }),
 };
 
 export type { ApiMessage };

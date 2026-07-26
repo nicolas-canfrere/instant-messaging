@@ -68,4 +68,30 @@ final readonly class DbalLastMessagePointerWriter implements LastMessagePointerW
             ? LastMessagePointerOutcome::ConversationMissing
             : LastMessagePointerOutcome::Superseded;
     }
+
+    public function refreshPreview(
+        ConversationId $conversationId,
+        MessageId $messageId,
+        ?string $preview,
+    ): bool {
+        // `AND last_message_id = :message_id` fait tout le travail : si le
+        // message n'est plus le dernier, zero ligne touchee. La condition et
+        // l'ecriture sont la MEME instruction, donc aucune course possible entre
+        // un SELECT et un UPDATE.
+        $affected = $this->connection->executeStatement(
+            <<<'SQL'
+                UPDATE conversations
+                SET last_message_preview = :preview
+                WHERE id = :conversation_id
+                  AND last_message_id = :message_id
+                SQL,
+            [
+                'preview' => $preview,
+                'conversation_id' => $conversationId->toString(),
+                'message_id' => $messageId->toString(),
+            ],
+        );
+
+        return $affected > 0;
+    }
 }

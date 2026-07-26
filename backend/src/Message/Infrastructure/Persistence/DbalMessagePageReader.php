@@ -46,18 +46,18 @@ final readonly class DbalMessagePageReader implements MessagePageReaderInterface
             $parameters['before'] = $before->toString();
         }
 
-        /** @var list<array{id: string, conversation_id: string, sender_id: string, content: string, client_message_id: string, created_at: string}> $rows */
+        /** @var list<array{id: string, conversation_id: string, sender_id: string, content: string|null, client_message_id: string, created_at: string, edited_at: string|null, deleted_at: string|null}> $rows */
         $rows = $this->connection->fetchAllAssociative(
             null === $before
                 ? <<<'SQL'
-                    SELECT id, conversation_id, sender_id, content, client_message_id, created_at
+                    SELECT id, conversation_id, sender_id, content, client_message_id, created_at, edited_at, deleted_at
                     FROM messages
                     WHERE conversation_id = :conversation_id
                     ORDER BY id DESC
                     LIMIT :limit
                     SQL
                 : <<<'SQL'
-                    SELECT id, conversation_id, sender_id, content, client_message_id, created_at
+                    SELECT id, conversation_id, sender_id, content, client_message_id, created_at, edited_at, deleted_at
                     FROM messages
                     WHERE conversation_id = :conversation_id
                       AND id < :before
@@ -76,6 +76,8 @@ final readonly class DbalMessagePageReader implements MessagePageReaderInterface
                 $row['content'],
                 $row['client_message_id'],
                 DatabaseTimestamp::toAtom($row['created_at']),
+                DatabaseTimestamp::toAtom($row['edited_at']),
+                DatabaseTimestamp::toAtom($row['deleted_at']),
             ),
             $rows,
         );

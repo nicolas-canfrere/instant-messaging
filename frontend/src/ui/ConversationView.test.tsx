@@ -31,6 +31,8 @@ function threadWith(conversationId: string, content: string): Thread {
         senderId: ALICE.id,
         content,
         createdAt: '2026-07-25T18:00:00+00:00',
+        editedAt: null,
+        deletedAt: null,
         status: 'sent',
       },
     ],
@@ -66,6 +68,8 @@ describe('ConversationView', () => {
       receiptsState: emptyReceiptsState(),
       onLoadOlder: vi.fn(),
       onSend: vi.fn(async () => {}),
+      onDeleteMessage: vi.fn(),
+      onEditMessage: vi.fn(),
       onTyping: vi.fn(),
     };
 

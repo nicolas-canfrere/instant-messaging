@@ -37,6 +37,8 @@ function fromApiMessage(message: ApiMessage): StoredMessage {
     senderId: message.sender_id,
     content: message.content,
     createdAt: message.created_at,
+    editedAt: message.edited_at,
+    deletedAt: message.deleted_at,
     status: 'sent',
   };
 }
@@ -52,6 +54,8 @@ const NAMED_EVENTS = [
   'membership.changed',
   'typing.started',
   'receipt.updated',
+  'message.deleted',
+  'message.edited',
 ];
 
 /**
@@ -125,8 +129,10 @@ function toStoredMessage(payload: Record<string, unknown>): StoredMessage {
     clientMessageId: clientMessageId === '' ? id : clientMessageId,
     conversationId: readString(payload, 'conversation_id'),
     senderId: readString(payload, 'sender_id'),
-    content: readString(payload, 'content'),
+    content: readNullableString(payload, 'content'),
     createdAt: readString(payload, 'created_at'),
+    editedAt: readNullableString(payload, 'edited_at'),
+    deletedAt: readNullableString(payload, 'deleted_at'),
     status: 'sent',
   };
 }
@@ -181,6 +187,8 @@ export type AppState = {
   loadOlder: () => void;
   refreshConversations: () => Promise<void>;
   send: (conversationId: string, content: string) => Promise<void>;
+  deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
+  editMessage: (conversationId: string, messageId: string, content: string) => Promise<void>;
   createDirect: (peerId: string) => Promise<void>;
   createGroup: (title: string, memberIds: string[]) => Promise<void>;
 };
@@ -291,6 +299,8 @@ export function useAppState(me: Me): AppState {
           senderId: me.id,
           content,
           createdAt: new Date().toISOString(),
+          editedAt: null,
+          deletedAt: null,
           status: 'pending',
         },
       });
@@ -309,6 +319,72 @@ export function useAppState(me: Me): AppState {
       }
     },
     [me.id],
+  );
+
+  const deleteMessage = useCallback(
+    async (conversationId: string, messageId: string) => {
+      await api.deleteMessage(conversationId, messageId);
+
+      // Comme pour l'edition : on applique localement des le 2xx, sans attendre
+      // l'echo SSE. Si le hub est injoignable, l'echo n'arrivera JAMAIS, et rien
+      // dans le front ne recharge un fil deja charge — le message supprime
+      // resterait affiche sans la moindre erreur visible. L'operation est
+      // idempotente, le doublon avec l'echo est donc sans consequence.
+      //
+      // `DELETE` repond 204 sans corps : il n'y a pas de `deleted_at` serveur a
+      // appliquer, on pose donc un instant CLIENT provisoire, que l'echo SSE
+      // ecrasera avec la valeur serveur. C'est le motif de l'envoi optimiste de
+      // la tranche 1, et il est legitime ici parce que `deletedAt` ne sert qu'a
+      // lever le drapeau du tombstone, jamais a ordonner : l'ordre du fil reste
+      // porte par l'ULID serveur.
+      dispatch({
+        type: 'message/deleted',
+        conversationId,
+        id: messageId,
+        deletedAt: new Date().toISOString(),
+      });
+    },
+    [],
+  );
+
+  const editMessage = useCallback(
+    async (conversationId: string, messageId: string, content: string) => {
+      const updated = await api.editMessage(conversationId, messageId, content);
+
+      // Un message edite a toujours une charge utile : editer un tombstone est
+      // refuse en 409. Un `content` nul ici voudrait dire que la reponse ne dit
+      // pas ce qu'on croit — on ne l'applique alors pas, plutot que d'inventer
+      // une chaine vide qui effacerait le message a l'ecran.
+      //
+      // On laisse une trace : c'est le seul chemin du fichier ou une reponse
+      // serveur est ignoree. L'anomalie n'est pas actionnable par l'utilisateur,
+      // elle ne remonte donc pas a l'ecran — mais un abandon totalement muet
+      // serait indebuggable.
+      if (updated.content === null) {
+        reportRealtimeIssue(
+          `reponse d edition sans contenu ignoree pour le message ${messageId}`,
+          null,
+        );
+
+        return;
+      }
+
+      // La reponse porte le meme etat final que l'echo SSE : l'appliquer ici
+      // aussi rend l'edition visible meme si le hub est injoignable, et
+      // l'operation est idempotente donc le doublon est sans consequence.
+      //
+      // `edited_at` est transporte TEL QUEL, y compris nul : le serveur est
+      // l'autorite sur « ce message a-t-il ete modifie ». Le reduire a une
+      // chaine vide affichait « · modifie » sur un message jamais modifie.
+      dispatch({
+        type: 'message/edited',
+        conversationId,
+        id: messageId,
+        content: updated.content,
+        editedAt: updated.edited_at,
+      });
+    },
+    [],
   );
 
   /**
@@ -485,6 +561,37 @@ export function useAppState(me: Me): AppState {
           return;
         }
 
+        if (event.type === 'message.deleted') {
+          dispatch({
+            type: 'message/deleted',
+            conversationId: readString(event.payload, 'conversation_id'),
+            id: readString(event.payload, 'id'),
+            deletedAt: readString(event.payload, 'deleted_at'),
+          });
+
+          // L'apercu de la colonne de gauche a change lui aussi.
+          scheduleConversationsRefresh();
+
+          return;
+        }
+
+        if (event.type === 'message.edited') {
+          dispatch({
+            type: 'message/edited',
+            conversationId: readString(event.payload, 'conversation_id'),
+            id: readString(event.payload, 'id'),
+            content: readString(event.payload, 'content'),
+            // Meme fidelite que sur la reponse du `PATCH` : un `edited_at`
+            // absent reste `null` plutot que de devenir une chaine vide, que
+            // `MessageList` lirait comme « ce message a ete modifie ».
+            editedAt: readNullableString(event.payload, 'edited_at'),
+          });
+
+          scheduleConversationsRefresh();
+
+          return;
+        }
+
         if (event.type === 'receipt.updated') {
           dispatchReceipts({
             type: 'receipt/updated',
@@ -578,6 +685,8 @@ export function useAppState(me: Me): AppState {
     loadOlder,
     refreshConversations,
     send,
+    deleteMessage,
+    editMessage,
     createDirect,
     createGroup,
   };

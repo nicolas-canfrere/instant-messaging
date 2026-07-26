@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from './api/client';
+import { ProblemError } from './api/problem';
 import type { Me } from './api/types';
 import { useAppState } from './hooks/useAppState';
 import { selectThread } from './store/messagesReducer';
@@ -69,6 +70,8 @@ function Workspace({ me }: { me: Me }) {
     selectConversation,
     loadOlder,
     send,
+    deleteMessage,
+    editMessage,
     createDirect,
     createGroup,
   } = useAppState(me);
@@ -106,6 +109,33 @@ function Workspace({ me }: { me: Me }) {
           receiptsState={receiptsState}
           onLoadOlder={loadOlder}
           onSend={(content) => send(selected.id, content)}
+          // Pas d'`await` ici : la suppression est declenchee depuis un
+          // `onClick`, qui ne peut pas attendre une promesse. Mais contrairement
+          // a l'ACK de livraison (qui se rattrape au message suivant, voir
+          // `api.receipts` dans `useAppState`), une suppression est une action
+          // EXPLICITE de l'utilisateur : un echec avale en silence le laisserait
+          // croire que son message a disparu pour tout le monde alors que ce
+          // n'est pas le cas. On l'avertit donc via une alerte plutot que
+          // d'ignorer le rejet.
+          onDeleteMessage={(messageId) => {
+            void deleteMessage(selected.id, messageId).catch((cause: unknown) => {
+              window.alert(
+                cause instanceof ProblemError ? cause.detail : 'Suppression impossible.',
+              );
+            });
+          }}
+          // Meme motif que la suppression ci-dessus : une edition est un geste
+          // explicite (l'utilisateur vient de taper un texte corrige). L'avaler
+          // en silence laisserait croire que la correction est visible de tous
+          // alors qu'elle n'a jamais quitte le navigateur — pire que de ne rien
+          // avoir change.
+          onEditMessage={(messageId, content) => {
+            void editMessage(selected.id, messageId, content).catch((cause: unknown) => {
+              window.alert(
+                cause instanceof ProblemError ? cause.detail : 'Modification impossible.',
+              );
+            });
+          }}
           onTyping={() => notifyTyping(selected.id)}
         />
       )}

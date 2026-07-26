@@ -15,8 +15,10 @@ export type StoredMessage = {
   clientMessageId: string;
   conversationId: string;
   senderId: string;
-  content: string;
+  content: string | null;
   createdAt: string;
+  editedAt: string | null;
+  deletedAt: string | null;
   status: MessageStatus;
 };
 
@@ -33,7 +35,20 @@ export type MessagesAction =
   | { type: 'message/optimistic'; message: StoredMessage }
   | { type: 'message/acknowledged'; conversationId: string; clientMessageId: string; serverId: string }
   | { type: 'message/failed'; conversationId: string; clientMessageId: string }
-  | { type: 'message/received'; message: StoredMessage };
+  | { type: 'message/received'; message: StoredMessage }
+  | { type: 'message/deleted'; conversationId: string; id: string; deletedAt: string }
+  | {
+      type: 'message/edited';
+      conversationId: string;
+      id: string;
+      content: string;
+      // Nullable, parce que le serveur peut legitimement le renvoyer nul : une
+      // edition qui ne change rien est un no-op cote agregat, `edited_at` reste
+      // donc `null` en base. Un type `string` obligeait l'appelant a inventer
+      // une chaine vide, que `MessageList` lisait comme « modifie » puisqu'elle
+      // n'est pas `null`. Le type doit pouvoir dire ce que le serveur dit.
+      editedAt: string | null;
+    };
 
 const EMPTY_THREAD: Thread = { items: [], nextBefore: null, loaded: false };
 
@@ -117,6 +132,42 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
         items: thread.items.map((item) =>
           item.clientMessageId === action.clientMessageId
             ? { ...item, status: 'failed' as const }
+            : item,
+        ),
+      }));
+
+    case 'message/deleted':
+      // Applique par `id` SERVEUR : contrairement a l'envoi, il n'y a pas de
+      // passe `client_message_id` a faire — le message est deja persiste, donc
+      // la cle de reconciliation existe.
+      //
+      // Un `id` absent du fil ne declenche rien : le message n'a jamais ete
+      // charge, et la page d'historique qui le contiendra le lira deja a jour.
+      return patchThread(state, action.conversationId, (thread) => ({
+        ...thread,
+        items: thread.items.map((item) =>
+          item.id === action.id
+            ? { ...item, content: null, deletedAt: action.deletedAt }
+            : item,
+        ),
+      }));
+
+    case 'message/edited':
+      // Meme motif que `message/deleted` : reconciliation par `id` SERVEUR,
+      // et un `id` absent du fil est ignore silencieusement (le message n'a
+      // jamais ete charge dans ce thread).
+      //
+      // `deletedAt !== null` laisse l'item INTACT, et c'est un invariant, pas
+      // une optimisation : une retractation ne se defait pas. SSE ne garantit
+      // aucun ordre entre deux evenements distincts, un echo d'edition peut
+      // donc arriver apres un echo de suppression — remettre `content` ferait
+      // alors ressusciter dans le store une charge utile que le serveur a
+      // reellement effacee, contredisant « record soft, payload hard ».
+      return patchThread(state, action.conversationId, (thread) => ({
+        ...thread,
+        items: thread.items.map((item) =>
+          item.id === action.id && item.deletedAt === null
+            ? { ...item, content: action.content, editedAt: action.editedAt }
             : item,
         ),
       }));

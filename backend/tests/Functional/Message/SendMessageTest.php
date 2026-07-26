@@ -263,11 +263,6 @@ final class SendMessageTest extends DatabaseTestCase
         );
     }
 
-    private function firstConversationId(): string
-    {
-        return $this->conversations()[0]['id'];
-    }
-
     private function conversationIdOfType(string $type): string
     {
         foreach ($this->conversations() as $conversation) {
@@ -293,28 +288,5 @@ final class SendMessageTest extends DatabaseTestCase
         );
 
         return $body;
-    }
-
-    private function send(string $conversationId, string $clientMessageId, string $content): string
-    {
-        $this->client->request(
-            'POST',
-            sprintf('/api/conversations/%s/messages', $conversationId),
-            server: ['CONTENT_TYPE' => 'application/json'],
-            content: json_encode(
-                ['client_message_id' => $clientMessageId, 'content' => $content],
-                \JSON_THROW_ON_ERROR,
-            ),
-        );
-
-        /** @var array{id?: string} $decoded */
-        $decoded = json_decode(
-            (string) $this->client->getResponse()->getContent(),
-            true,
-            512,
-            \JSON_THROW_ON_ERROR,
-        );
-
-        return $decoded['id'] ?? '';
     }
 }

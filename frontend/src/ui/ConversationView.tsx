@@ -19,6 +19,8 @@ type Props = {
   receiptsState: ReceiptsState;
   onLoadOlder: () => void;
   onSend: (content: string) => Promise<void>;
+  onDeleteMessage: (messageId: string) => void;
+  onEditMessage: (messageId: string, content: string) => void;
   onTyping: () => void;
 };
 
@@ -32,6 +34,8 @@ export function ConversationView({
   receiptsState,
   onLoadOlder,
   onSend,
+  onDeleteMessage,
+  onEditMessage,
   onTyping,
 }: Props) {
   // Etat purement local d'affichage : personne d'autre n'a besoin de savoir si
@@ -84,6 +88,8 @@ export function ConversationView({
           receiptsState={receiptsState}
           isGroup={conversation.type === 'group'}
           onLoadOlder={onLoadOlder}
+          onDeleteMessage={onDeleteMessage}
+          onEditMessage={onEditMessage}
         />
 
         {/*

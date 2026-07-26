@@ -71,24 +71,6 @@ final class UnreadCountTest extends DatabaseTestCase
         self::fail('Conversation absente de la liste.');
     }
 
-    private function send(string $conversationId, string $clientMessageId, string $content): string
-    {
-        $this->client->request(
-            'POST',
-            sprintf('/api/conversations/%s/messages', $conversationId),
-            server: ['CONTENT_TYPE' => 'application/json'],
-            content: json_encode(
-                ['client_message_id' => $clientMessageId, 'content' => $content],
-                \JSON_THROW_ON_ERROR,
-            ),
-        );
-
-        /** @var array{id: string} $body */
-        $body = $this->json();
-
-        return $body['id'];
-    }
-
     private function createDirectWith(string $username): string
     {
         $peerId = $this->userId($username);

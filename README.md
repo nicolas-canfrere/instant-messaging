@@ -56,6 +56,41 @@ migration that ships slice 2 adds two columns and nothing else — that absence 
 A persisted `is_online` boolean turns false on the first crash and is never reset; an
 expiring key is self-healing by construction.
 
+**Deleting for everyone is soft on the record and hard on the payload.** The `messages` row
+stays — with its id, its sender, its instant and therefore its place in the ordering — and
+`content` is set to `NULL`. Hiding it at render time would not be deletion: a patched client
+would still read the text. Keeping the row is not a half-measure either, it is the point: the
+slice-2 watermarks reference message ids, and the keyset pagination reads `WHERE id < :before`,
+so removing the line would dangle the former and punch a hole in the latter. A database `CHECK`
+states the invariant where the database can hold it itself: `(deleted_at IS NULL) = (content IS
+NOT NULL)`. Editing, by contrast, is allowed **only within 15 minutes**, and the asymmetry is
+deliberate: regret has no expiry date and a tombstone is visible to everyone, so it stays
+honest — but editing late rewrites the history of a conversation that has already been read,
+and nothing in the interface would tell the recipients what the message used to say. The window
+is a constant on the aggregate, not a configuration knob, because it is a business rule.
+
+**The two new real-time events deliberately carry no SSE `id`.** Everywhere else the Mercure
+event id is the message's ULID, so `Last-Event-ID` will be usable later without a format change.
+Editing an old message would emit an event whose ULID is *older* than ones the client has
+already seen — a resumption cursor that goes backwards would make the hub replay the whole
+history from that point on the next reconnection, which is worse than no resumption at all.
+`message.edited` and `message.deleted` are therefore not replayable, and they carry **state, not
+a delta**: a client that missed one gets the current truth from the next history page. The
+retraction event also carries no content — an event that erases a payload has no business
+shipping it to every subscriber. Deleting or editing the newest message of a conversation
+refreshes the denormalised preview in the left-hand list by choreography: `Message` publishes a
+fact, `Conversation` updates **its own** pointer with a guarded `UPDATE` whose `WHERE` clause
+does all the deciding.
+
+**Instants are absolute; time zones are a rendering concern.** `TIMESTAMPTZ` in the database,
+`TZ=UTC` in the container, ISO 8601 on the wire — the backend never learns the reader's time
+zone, and no `users.time_zone` column exists, because only scheduling would need one and nothing
+schedules. Day separators, clock times and relative times are computed client-side from
+`Intl.DateTimeFormat().resolvedOptions().timeZone` and `navigator.language`. The zone and the
+locale are **parameters** of the pure functions in `ui/dates.ts`, never globals read from
+inside, which is what lets one test file check Tokyo and New York against the same instant: the
+same message legitimately sits under a different day separator for each of them.
+
 **Frontend logic lives outside React.** Deduplication, optimistic reconciliation and ULID
 ordering are a pure reducer, testable by calling a function. The `EventSource` has exactly one
 owner. Components are kept as dumb as possible.
@@ -203,14 +238,15 @@ make front-test             # Vitest
 
 ## Roadmap
 
-The project is cut into five slices, each with its own spec and plan. **Slices 1 and 2 are
+The project is cut into five slices, each with its own spec and plan. **Slices 1 to 3 are
 delivered**; nothing outside them is implemented yet.
 
 1. **Real-time core and conversations** — send, receive, list, paginate *(delivered)*
 2. **Read receipts and presence** — watermarks, typing indicator, online dot, unread badge
    *(delivered)*
-3. Editing and deletion *(next)*
-4. Media
+3. **Message lifecycle** — delete for everyone, edit within 15 minutes, reader-local dates
+   *(delivered)*
+4. Media *(next)*
 5. Search and moderation
 
 ---
@@ -222,5 +258,6 @@ delivered**; nothing outside them is implemented yet.
 | `docs/adr/`                  | Cross-cutting decisions. They outlive slices and win over specs |
 | `docs/superpowers/specs/`    | One spec per slice, including the alternatives rejected and why |
 | [Slice 2 design](docs/superpowers/specs/2026-07-25-instant-messaging-tranche-2-design.md) | Why receipts are durable and presence is not |
+| [Slice 3 design](docs/superpowers/specs/2026-07-26-instant-messaging-tranche-3-design.md) | Which of the five meanings of "delete" is implemented, and what the other four would cost |
 | `docs/superpowers/plans/`    | Implementation plans, one story per branch                      |
 | `CLAUDE.md`                  | The conventions this codebase is held to                        |

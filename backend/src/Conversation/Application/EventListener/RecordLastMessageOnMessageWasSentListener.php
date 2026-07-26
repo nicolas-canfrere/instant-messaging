@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Conversation\Application\EventListener;
 
 use App\Conversation\Application\Command\RecordLastMessageCommand;
+use App\Conversation\Application\LastMessagePreview;
 use App\Shared\Application\Bus\CommandDispatcherInterface;
 use App\Shared\Application\Bus\DomainEventListenerInterface;
 use App\Shared\Domain\Event\MessageWasSent;
@@ -18,8 +19,6 @@ use App\Shared\Domain\Event\MessageWasSent;
  */
 final readonly class RecordLastMessageOnMessageWasSentListener implements DomainEventListenerInterface
 {
-    private const int PREVIEW_LENGTH = 80;
-
     public function __construct(private CommandDispatcherInterface $commands)
     {
     }
@@ -33,7 +32,7 @@ final readonly class RecordLastMessageOnMessageWasSentListener implements Domain
             $event->messageId,
             $event->senderId,
             $event->createdAt,
-            mb_substr($event->content, 0, self::PREVIEW_LENGTH),
+            LastMessagePreview::fromContent($event->content),
         ));
     }
 }
