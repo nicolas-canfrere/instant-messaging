@@ -19,7 +19,7 @@ final readonly class MessageMapper
      * @param array{id: string, conversation_id: string, sender_id: string, content: string|null, client_message_id: string, created_at: string, edited_at: string|null, deleted_at: string|null} $row
      * @param list<string>                                                                                                                                                                     $mediaIds dans l'ordre de `position`
      */
-    public function fromRow(array $row, array $mediaIds = []): Message
+    public function fromRow(array $row, array $mediaIds): Message
     {
         return Message::reconstitute(
             MessageId::fromString($row['id']),
