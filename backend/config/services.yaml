@@ -78,6 +78,7 @@ services:
     App\Media\Application\MediaStorageInterface: '@App\Media\Infrastructure\Storage\S3MediaStorage'
     App\Media\Application\ImageInspectorInterface: '@App\Media\Infrastructure\Image\GdImageInspector'
     App\Media\Application\Contract\MediaOwnershipInterface: '@App\Media\Infrastructure\Contract\DbalMediaOwnership'
+    App\Media\Application\Contract\MediaFinderInterface: '@App\Media\Infrastructure\Contract\DbalMediaFinder'
     App\Message\Domain\Port\MediaOwnershipPortInterface: '@App\Message\Infrastructure\Contract\MediaOwnershipAdapter'
 
     # Deux clients S3, deux endpoints. Le signeur ne sert QU'A signer : il ne

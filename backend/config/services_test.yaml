@@ -49,9 +49,8 @@ services:
     Psr\Clock\ClockInterface:
         alias: Symfony\Component\Clock\MockClock
 
-    # Rien ne consomme encore ce port (la tache 5 y ajoutera un handler) : le
-    # compilateur retire sinon le service comme inutilise, et le test ne peut
-    # plus le recuperer par le conteneur.
+    # `public: true` pour que les tests puissent semer un media directement par
+    # l'agregat, sans passer par le flux d'upload complet.
     #
     # `autowire: true` explicite : contrairement a MockClock ci-dessus, ce
     # constructeur a de vrais arguments (Connection, MediaMapper,
@@ -63,3 +62,15 @@ services:
 
     App\Media\Domain\MediaRepositoryInterface:
         alias: App\Media\Infrastructure\Persistence\DbalMediaRepository
+
+    # Compteur de requetes SQL. Seul moyen d'assertionner « UNE requete de
+    # medias pour toute la page, pas une par message » : sans lui, la solution
+    # naive (un aller-retour par message) passerait tous les autres tests.
+    App\Tests\Support\QueryRecorder\RecordedQueries:
+        public: true
+
+    App\Tests\Support\QueryRecorder\QueryRecorderMiddleware:
+        arguments:
+            $recorded: '@App\Tests\Support\QueryRecorder\RecordedQueries'
+        tags:
+            - { name: doctrine.middleware }

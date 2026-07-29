@@ -3688,9 +3688,10 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `backend/src/Media/Application/Contract/MediaView.php`, `MediaFinderInterface.php`, `backend/src/Media/Infrastructure/Contract/DbalMediaFinder.php`
-- Create: `backend/src/Message/Domain/Port/MediaFinderPortInterface.php`, `backend/src/Message/Infrastructure/Contract/MediaFinderAdapter.php`
+- ~~Create: `backend/src/Message/Domain/Port/MediaFinderPortInterface.php`, `backend/src/Message/Infrastructure/Contract/MediaFinderAdapter.php`~~ — **abandonné à l'implémentation.** Les deux seuls consommateurs, `DbalMessagePageReader` et `DbalMessageReader`, sont en `Infrastructure` : ils nomment `MediaFinderInterface` directement. Le port et l'adaptateur n'auraient fait que déléguer un appel identique, et le port aurait mis un `MediaView` — donc le contrat d'un contexte voisin — dans `Message/Domain/`. Le port d'écriture `MediaOwnershipPortInterface` reste justifié, lui : son consommateur est `SendMessageCommandHandler`, en `Application`.
 - Modify: `backend/src/Message/Application/Query/MessageView.php`, `backend/src/Message/Infrastructure/Persistence/DbalMessagePageReader.php`, `DbalMessageReader.php`
 - Test: `backend/tests/Functional/Message/MessageMediaReadTest.php`
+- Create (non prévu) : `backend/tests/Support/QueryRecorder/` — compteur de requêtes DBAL. Le profileur de doctrine-bundle ne convient pas, `doctrine.debug_data_holder` portant `kernel.reset` : le `ServicesResetter` le vide après chaque requête HTTP, donc une assertion posée après la réponse ne trouverait rien. Même raison que `MediaCommandSpy`.
 
 **Interfaces:**
 - Produces : `MediaFinderInterface::viewsFor(list<MediaId>): array<string, MediaView>` — indexé par ULID. `MediaView` : `readonly` avec `string $id`, `string $status`, `?string $mimeType`, `?int $width`, `?int $height`, `?string $url`, `?string $thumbnailUrl`, et `toArray(): array<string, scalar|null>`.
@@ -3750,7 +3751,7 @@ Une requête `IN (:ids)` avec `ArrayParameterType::STRING`, puis signature des U
 
 - [ ] **Step 4: Hydrater les lectures de messages**
 
-Dans `DbalMessagePageReader::page()` : après avoir récupéré les lignes de messages, **une seule** requête sur `message_media` pour tous les ids de la page, puis **un seul** appel à `MediaFinderPortInterface::viewsFor()`.
+Dans `DbalMessagePageReader::page()` : après avoir récupéré les lignes de messages, **une seule** requête sur `message_media` pour tous les ids de la page, puis **un seul** appel à `MediaFinderInterface::viewsFor()`.
 
 ```php
         // UNE requete pour toute la page, jamais une par message : le N+1 est

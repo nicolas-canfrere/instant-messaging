@@ -16,7 +16,7 @@ final readonly class MessagePage
     ) {
     }
 
-    /** @return array{items: list<array<string, string|null>>, next_before: string|null} */
+    /** @return array{items: list<array<string, mixed>>, next_before: string|null} */
     public function toArray(): array
     {
         return [
