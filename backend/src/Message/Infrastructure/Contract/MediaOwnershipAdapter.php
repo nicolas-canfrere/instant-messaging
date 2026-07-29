@@ -15,8 +15,8 @@ final readonly class MediaOwnershipAdapter implements MediaOwnershipPortInterfac
     {
     }
 
-    public function assertUsableBy(array $mediaIds, UserId $ownerId): void
+    public function assertOwnedBy(array $mediaIds, UserId $ownerId): void
     {
-        $this->ownership->assertUsableBy($mediaIds, $ownerId);
+        $this->ownership->assertOwnedBy($mediaIds, $ownerId);
     }
 }

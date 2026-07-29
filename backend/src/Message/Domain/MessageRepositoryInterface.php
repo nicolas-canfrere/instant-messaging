@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Message\Domain;
 
 use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\MessageId;
 
 interface MessageRepositoryInterface
@@ -16,6 +17,20 @@ interface MessageRepositoryInterface
      *                      deja present en cas de rejeu
      */
     public function insertIfAbsent(Message $message): ?Message;
+
+    /**
+     * « Ce media est-il deja porte par un message ? » se pose sur
+     * `message_media`, une table que Message possede : ce n'est PAS une
+     * question pour Media (cf. MediaOwnershipPortInterface). L'unicite est
+     * de toute facon garantie en base par `UNIQUE (media_id)` ; ce garde-fou
+     * transforme une violation de contrainte imprevisible (500) en un
+     * refus nomme (409).
+     *
+     * @param list<MediaId> $mediaIds
+     *
+     * @throws MediaAlreadyAttachedException un des medias est deja attache a un message
+     */
+    public function assertNoneAttached(array $mediaIds): void;
 
     /**
      * Charge un message DANS SA CONVERSATION.

@@ -5,13 +5,16 @@ declare(strict_types=1);
 namespace App\Message\Infrastructure\Persistence;
 
 use App\Message\Domain\ClientMessageId;
+use App\Message\Domain\MediaAlreadyAttachedException;
 use App\Message\Domain\Message;
 use App\Message\Domain\MessageNotFoundException;
 use App\Message\Domain\MessageRepositoryInterface;
 use App\Shared\Application\Event\DomainEventCollectorInterface;
 use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Domain\Identifier\UserId;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 
 final readonly class DbalMessageRepository implements MessageRepositoryInterface
@@ -70,6 +73,26 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
         return null;
     }
 
+    public function assertNoneAttached(array $mediaIds): void
+    {
+        if ([] === $mediaIds) {
+            return;
+        }
+
+        /** @var list<string> $attached */
+        $attached = $this->connection->fetchFirstColumn(
+            <<<'SQL'
+                SELECT media_id FROM message_media WHERE media_id IN (:media_ids)
+                SQL,
+            ['media_ids' => array_map(static fn(MediaId $id): string => $id->toString(), $mediaIds)],
+            ['media_ids' => ArrayParameterType::STRING],
+        );
+
+        if ([] !== $attached) {
+            throw MediaAlreadyAttachedException::withId(MediaId::fromString($attached[0]));
+        }
+    }
+
     public function ofId(ConversationId $conversationId, MessageId $messageId): Message
     {
         // Les deux identifiants sont dans le WHERE : un message d'un autre fil
@@ -117,8 +140,11 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
             ],
         );
 
-        // Traduction du detachement decide par l'agregat : un message qui ne
-        // porte plus aucun media (suppression pour tous) perd ses liaisons.
+        // Ce test dit « la liste est vide », pas « detache » : il se declenche
+        // aussi bien pour un message texte-seul (jamais de liaison, DELETE
+        // sans effet) que pour une suppression pour tous (liaisons reelles,
+        // DELETE effectif). Il ne sait pas exprimer « le media a change » —
+        // hors perimetre ici, aucune route n'edite les medias d'un message.
         if ([] === $message->mediaIds()) {
             $this->connection->executeStatement(
                 <<<'SQL'

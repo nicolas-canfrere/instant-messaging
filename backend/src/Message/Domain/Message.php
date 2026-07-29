@@ -61,6 +61,12 @@ final class Message
                 // `string`, sans les medias. Un message image-seule y voyage
                 // avec un contenu vide ; la charge utile media arrivera par la
                 // tache 8, dans un evenement distinct.
+                //
+                // Consequence visible avant la tache 8 : Conversation ecoute cet
+                // evenement pour son `last_message_preview`, et un message
+                // image-seule y ecrit donc une chaine vide — l'ecran d'accueil
+                // affiche une ligne blanche jusqu'a ce que la tache 8 y mette un
+                // apercu ("📷 Photo" ou equivalent). Pas un bug de cette tache.
                 $content?->toString() ?? '',
                 $clientMessageId->toString(),
                 $now,

@@ -40,7 +40,12 @@ final readonly class SendMessageCommandHandler implements CommandHandlerInterfac
 
         // Meme raison : une verification hors transaction serait devancable
         // par un second envoi qui attacherait le meme media en meme temps.
-        $this->mediaOwnership->assertUsableBy($command->mediaIds, $command->senderId);
+        //
+        // Deux questions, deux proprietaires : Media confirme l'appartenance
+        // (sa table, media_objects) ; Message confirme l'absence d'attachement
+        // prealable (SA table, message_media) — Media ne lit jamais celle-ci.
+        $this->mediaOwnership->assertOwnedBy($command->mediaIds, $command->senderId);
+        $this->messages->assertNoneAttached($command->mediaIds);
 
         $message = Message::send(
             $command->messageId,
