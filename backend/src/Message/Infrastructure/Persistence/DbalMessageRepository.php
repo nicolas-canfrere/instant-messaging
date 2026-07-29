@@ -88,8 +88,20 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
             ['media_ids' => ArrayParameterType::STRING],
         );
 
-        if ([] !== $attached) {
-            throw MediaAlreadyAttachedException::withId(MediaId::fromString($attached[0]));
+        if ([] === $attached) {
+            return;
+        }
+
+        $attachedIds = array_flip($attached);
+
+        // Parcourt $mediaIds, dans l'ORDRE DE LA REQUETE, plutot que $attached
+        // dans l'ordre que Postgres choisit de rendre : sans cela, le 409
+        // nommerait un media arbitraire du point de vue du client au lieu du
+        // premier fautif de sa propre liste.
+        foreach ($mediaIds as $mediaId) {
+            if (isset($attachedIds[$mediaId->toString()])) {
+                throw MediaAlreadyAttachedException::withId($mediaId);
+            }
         }
     }
 

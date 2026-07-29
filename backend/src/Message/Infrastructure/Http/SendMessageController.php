@@ -47,10 +47,12 @@ final readonly class SendMessageController
         $messageId = MessageId::fromString($this->idGenerator->generate());
 
         $content = null === $payload->content ? null : MessageContent::fromString($payload->content);
-        // `array_values()` rend la docblock `list<string>` vraie : un corps
-        // JSON `{"0": "...", "a": "..."}` deserialise en tableau a cles
-        // NON sequentielles, qui percerait ensuite dans `position` (SMALLINT)
-        // via le `foreach (... as $position => $mediaId)` du repository.
+        // `SendMessagePayload::$mediaIds` est annote `array<string>`, pas
+        // `list<string>` : un corps JSON `{"0": "...", "a": "..."}`
+        // deserialise en tableau a cles NON sequentielles. `array_values()`
+        // le convertit ici en vraie liste, sans quoi une cle de tableau
+        // percerait dans `position` (SMALLINT) via le
+        // `foreach (... as $position => $mediaId)` du repository.
         $mediaIds = array_map(
             static fn(string $mediaId): MediaId => MediaId::fromString($mediaId),
             array_values($payload->mediaIds),

@@ -569,9 +569,16 @@ appartenant à quelqu'un d'autre qui n'existe pas. Un type hors allowlist sort d
 
 ### 8.4 Le contrat publié de `Media`
 
+> **Supersédé lors de la tâche 6 (finding 1).** Le commentaire `MediaOwnershipInterface.php`
+> ci-dessous en dit trop : la moitié « et est-il libre ? » a été retirée. Savoir si un média
+> est déjà attaché à un message porte sur `message_media`, une table de `Message` — `Media`
+> ne peut plus répondre à cette question sans lire une table qu'il ne possède pas. Le contrat
+> ne répond désormais que de l'appartenance ; l'absence d'attachement se vérifie côté
+> `Message`, contre sa propre table (`MessageRepositoryInterface::assertNoneAttached()`).
+
 ```
 Media/Application/Contract/
-├── MediaOwnershipInterface.php   # « ce média appartient-il à cette personne et est-il libre ? »
+├── MediaOwnershipInterface.php   # « ce média appartient-il à cette personne ? »
 ├── MediaFinderInterface.php      # « donne-moi les MediaView de ces ids, signés pour ce lecteur »
 └── MediaView.php
 ```

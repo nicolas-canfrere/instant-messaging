@@ -16,9 +16,12 @@ final class SendMessageWithMediaTest extends DatabaseTestCase
 {
     private const string CLIENT_ID = '01J9ZQ7X8K3M4N5P6Q7R8S9TAB';
     private const string OTHER_CLIENT_ID = '01J9ZQ7X8K3M4N5P6Q7R8S9TAC';
+    private const string THIRD_CLIENT_ID = '01J9ZQ7X8K3M4N5P6Q7R8S9TAD';
 
     private const string ALICE_MEDIA_ID = '01JQZ0000000000000000001AA';
     private const string BOB_MEDIA_ID = '01JQZ0000000000000000002AA';
+    private const string THIRD_MEDIA_ID = '01JQZ0000000000000000003AA';
+    private const string FOURTH_MEDIA_ID = '01JQZ0000000000000000004AA';
 
     public function testAMessageWithOnlyAnImageIsCreatedWithoutContent(): void
     {
@@ -171,6 +174,87 @@ final class SendMessageWithMediaTest extends DatabaseTestCase
 
         self::assertResponseStatusCodeSame(409);
         self::assertSame('/problems/media-already-attached', $this->json()['type']);
+    }
+
+    /**
+     * `mediaIdsOf()` (DbalMessageRepository) s'appuie sur `ORDER BY position`
+     * pour reconstituer l'agregat fidelement. Rien ne pinçait encore que
+     * `position` reflete l'ordre de la REQUETE plutot qu'un tri implicite —
+     * tous les autres tests n'attachent qu'un seul media.
+     */
+    public function testMultipleMediaArePersistedAndReadBackInRequestOrder(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $ownerId = $this->userId('alice');
+        $this->createMedia(self::ALICE_MEDIA_ID, $ownerId);
+        $this->createMedia(self::THIRD_MEDIA_ID, $ownerId);
+        $this->createMedia(self::FOURTH_MEDIA_ID, $ownerId);
+
+        // Ordre deliberement non trie : THIRD, ALICE, FOURTH.
+        $this->postWithMedia($conversationId, self::CLIENT_ID, null, [
+            self::THIRD_MEDIA_ID,
+            self::ALICE_MEDIA_ID,
+            self::FOURTH_MEDIA_ID,
+        ]);
+
+        self::assertResponseStatusCodeSame(201);
+
+        /** @var array{id: string} $created */
+        $created = $this->json();
+
+        // Meme requete que celle de mediaIdsOf() : c'est le mecanisme reel de
+        // relecture, pas une reconstruction ad hoc du test.
+        /** @var list<string> $orderedMediaIds */
+        $orderedMediaIds = $this->connection->fetchFirstColumn(
+            'SELECT media_id FROM message_media WHERE message_id = :message_id ORDER BY position',
+            ['message_id' => $created['id']],
+        );
+
+        self::assertSame(
+            [self::THIRD_MEDIA_ID, self::ALICE_MEDIA_ID, self::FOURTH_MEDIA_ID],
+            $orderedMediaIds,
+            'La position doit refleter l\'ordre de la requete, pas un tri implicite.',
+        );
+    }
+
+    /**
+     * Deux medias deja attaches, dans un ordre d'attachement DIFFERENT de
+     * l'ordre dans lequel la nouvelle requete les cite. Le 409 doit nommer le
+     * premier fautif du point de vue du CLIENT, pas celui qu'un `SELECT`
+     * sans `ORDER BY` choisirait de rendre en premier.
+     */
+    public function testTheConflictNamesTheFirstOffendingMediaInRequestOrder(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $ownerId = $this->userId('alice');
+        $this->createMedia(self::ALICE_MEDIA_ID, $ownerId);
+        $this->createMedia(self::THIRD_MEDIA_ID, $ownerId);
+
+        // ALICE_MEDIA_ID est attache EN PREMIER, THIRD_MEDIA_ID en second.
+        $this->postWithMedia($conversationId, self::CLIENT_ID, null, [self::ALICE_MEDIA_ID]);
+        self::assertResponseStatusCodeSame(201);
+        $this->postWithMedia($conversationId, self::OTHER_CLIENT_ID, null, [self::THIRD_MEDIA_ID]);
+        self::assertResponseStatusCodeSame(201);
+
+        // La nouvelle requete cite THIRD_MEDIA_ID EN PREMIER : le 409 doit le
+        // nommer, meme si ALICE_MEDIA_ID (attache plus tot) a plus de chances
+        // d'etre rendu en tete par un scan sans tri explicite.
+        $this->postWithMedia(
+            $conversationId,
+            self::THIRD_CLIENT_ID,
+            null,
+            [self::THIRD_MEDIA_ID, self::ALICE_MEDIA_ID],
+        );
+
+        self::assertResponseStatusCodeSame(409);
+
+        /** @var array{detail: string} $problem */
+        $problem = $this->json();
+
+        self::assertStringContainsString(self::THIRD_MEDIA_ID, $problem['detail']);
+        self::assertStringNotContainsString(self::ALICE_MEDIA_ID, $problem['detail']);
     }
 
     /** Le convertisseur snake_case s'applique aussi aux chemins indexes. */
