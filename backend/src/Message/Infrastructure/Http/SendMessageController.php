@@ -47,9 +47,13 @@ final readonly class SendMessageController
         $messageId = MessageId::fromString($this->idGenerator->generate());
 
         $content = null === $payload->content ? null : MessageContent::fromString($payload->content);
+        // `array_values()` rend la docblock `list<string>` vraie : un corps
+        // JSON `{"0": "...", "a": "..."}` deserialise en tableau a cles
+        // NON sequentielles, qui percerait ensuite dans `position` (SMALLINT)
+        // via le `foreach (... as $position => $mediaId)` du repository.
         $mediaIds = array_map(
             static fn(string $mediaId): MediaId => MediaId::fromString($mediaId),
-            $payload->mediaIds,
+            array_values($payload->mediaIds),
         );
 
         // Regle qui depend de DEUX champs : elle ne peut pas s'exprimer en
