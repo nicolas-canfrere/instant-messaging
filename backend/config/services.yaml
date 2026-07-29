@@ -65,7 +65,6 @@ services:
     App\Message\Domain\MessageRepositoryInterface: '@App\Message\Infrastructure\Persistence\DbalMessageRepository'
     App\Message\Application\Query\MessageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessageReader'
     App\Message\Application\Query\MessagePageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessagePageReader'
-    App\Conversation\Domain\Port\UnreadCounterPortInterface: '@App\Conversation\Infrastructure\Contract\UnreadCounterAdapter'
     App\Shared\Application\Bus\CommandDispatcherInterface: '@App\Shared\Infrastructure\Bus\CommandDispatcher'
 
     # Le meme convertisseur que celui du serialiseur, pour que les chemins de
@@ -80,8 +79,8 @@ services:
         tags:
             - { name: controller.argument_value_resolver, priority: 150 }
 
-    # Contrat publie par Conversation, consomme par Realtime : le seul couplage
-    # inter-contextes du projet, et il vise une surface publiee (cf. ADR 0001).
+    # Contrats publies par Conversation, consommes par Realtime et Message.
+    # Chaque couplage vise une surface publiee, jamais des internes (ADR 0001).
     App\Conversation\Application\Contract\MemberConversationsFinderInterface: '@App\Conversation\Infrastructure\Contract\DbalMemberConversationsFinder'
     App\Conversation\Application\Contract\ConversationMembershipInterface: '@App\Conversation\Infrastructure\Contract\DbalConversationMembership'
     App\Conversation\Application\Contract\ConversationPeersFinderInterface: '@App\Conversation\Infrastructure\Contract\DbalConversationPeersFinder'
