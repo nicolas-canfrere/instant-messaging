@@ -30,12 +30,104 @@ final class SendMessageWithMediaTest extends DatabaseTestCase
 
         self::assertResponseStatusCodeSame(201);
 
+        /** @var array{id: string} $created */
+        $created = $this->json();
+
         /** @var string|null $content */
         $content = $this->connection->fetchOne('SELECT content FROM messages WHERE id = :id', [
-            'id' => $this->json()['id'],
+            'id' => $created['id'],
         ]);
 
         self::assertNull($content);
+
+        // Le point de la fonctionnalite : la liaison existe reellement, pas
+        // seulement le contenu nul. Prouve directement plutot que de
+        // l'inferer via le test de conflit (409).
+        /** @var array{media_id: string, position: int}|false $link */
+        $link = $this->connection->fetchAssociative(
+            'SELECT media_id, position FROM message_media WHERE message_id = :message_id',
+            ['message_id' => $created['id']],
+        );
+
+        self::assertNotFalse($link, 'La liaison message_media doit exister.');
+        self::assertSame(self::ALICE_MEDIA_ID, $link['media_id']);
+        self::assertSame(0, $link['position']);
+    }
+
+    public function testTheTenMediaCapIsEnforced(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+
+        // Onze identifiants VALIDES au format, mais jamais crees en base : la
+        // contrainte de comptage doit refuser la requete avant meme que
+        // l'appartenance ne soit verifiee.
+        $elevenMediaIds = array_map(
+            static fn(int $i): string => sprintf('01JQZ%019dAA', $i),
+            range(1, 11),
+        );
+
+        $this->postWithMedia($conversationId, self::CLIENT_ID, null, $elevenMediaIds);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('/problems/validation-failed', $this->json()['type']);
+    }
+
+    /** Une meme cle deux fois dans UNE requete doit etre refusee avant d'atteindre le repository. */
+    public function testDuplicateMediaIdsInTheSameRequestAreRejected(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $this->createMedia(self::ALICE_MEDIA_ID, $this->userId('alice'));
+
+        $this->postWithMedia($conversationId, self::CLIENT_ID, null, [self::ALICE_MEDIA_ID, self::ALICE_MEDIA_ID]);
+
+        self::assertResponseStatusCodeSame(422);
+
+        /** @var array{type: string, violations: list<array{field: string, message: string}>} $problem */
+        $problem = $this->json();
+
+        self::assertSame('/problems/validation-failed', $problem['type']);
+        self::assertSame('media_ids', $problem['violations'][0]['field']);
+    }
+
+    /**
+     * Un corps `{"media_ids": {"a": "...", "b": "..."}}` deserialise en
+     * tableau a cles NON sequentielles. Sans `array_values()` dans le
+     * controleur, `position` (SMALLINT) recevrait une cle de tableau au lieu
+     * d'un entier — un 500 la ou l'entree meritait d'etre simplement
+     * normalisee.
+     */
+    public function testAnObjectShapedMediaIdsBodyIsNormalisedToAList(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $this->createMedia(self::ALICE_MEDIA_ID, $this->userId('alice'));
+
+        $this->client->request(
+            'POST',
+            sprintf('/api/conversations/%s/messages', $conversationId),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            // json_encode() serialise un tableau a cles non entieres
+            // sequentielles en objet JSON.
+            content: json_encode(
+                ['client_message_id' => self::CLIENT_ID, 'media_ids' => ['x' => self::ALICE_MEDIA_ID]],
+                \JSON_THROW_ON_ERROR,
+            ),
+        );
+
+        self::assertResponseStatusCodeSame(201);
+
+        /** @var array{id: string} $created */
+        $created = $this->json();
+
+        /** @var int $position */
+        $position = $this->connection->fetchOne(
+            'SELECT position FROM message_media WHERE message_id = :message_id AND media_id = :media_id',
+            ['message_id' => $created['id'], 'media_id' => self::ALICE_MEDIA_ID],
+        );
+
+        self::assertSame(0, $position);
     }
 
     public function testAMessageWithNeitherTextNorMediaIsRejected(): void
@@ -95,6 +187,72 @@ final class SendMessageWithMediaTest extends DatabaseTestCase
         $problem = $this->json();
 
         self::assertSame('media_ids[0]', $problem['violations'][0]['field']);
+    }
+
+    /**
+     * Regression : sans `mediaIds` obligatoire dans `MessageMapper::fromRow()`,
+     * `ofId()`/`ofClientKey()` reconstituaient TOUJOURS l'agregat avec une
+     * liste vide, quelle que soit la realite en base. `save()` traduit une
+     * liste vide en `DELETE FROM message_media` — donc `edit()` aurait
+     * detache silencieusement les medias d'un message au premier `PATCH`,
+     * bien avant toute suppression.
+     */
+    public function testEditingAMessageThatCarriesMediaKeepsItsAttachment(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $this->createMedia(self::ALICE_MEDIA_ID, $this->userId('alice'));
+
+        $this->postWithMedia($conversationId, self::CLIENT_ID, 'avant', [self::ALICE_MEDIA_ID]);
+        self::assertResponseStatusCodeSame(201);
+
+        /** @var array{id: string} $created */
+        $created = $this->json();
+
+        $this->client->request(
+            'PATCH',
+            sprintf('/api/conversations/%s/messages/%s', $conversationId, $created['id']),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(['content' => 'apres'], \JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(200);
+
+        $attachedCount = $this->connection->fetchOne(
+            'SELECT count(*) FROM message_media WHERE message_id = :message_id',
+            ['message_id' => $created['id']],
+        );
+
+        // `fetchOne` rend `mixed` : on restreint avant de convertir.
+        self::assertIsNumeric($attachedCount);
+        self::assertSame(1, (int) $attachedCount, 'Editer le texte ne doit pas detacher les medias.');
+    }
+
+    /** L'autre moitie du detachement : rien ne prouvait encore que le DELETE se produit reellement. */
+    public function testDeletingForEveryoneDetachesTheMediaInTheDatabase(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $this->createMedia(self::ALICE_MEDIA_ID, $this->userId('alice'));
+
+        $this->postWithMedia($conversationId, self::CLIENT_ID, null, [self::ALICE_MEDIA_ID]);
+        self::assertResponseStatusCodeSame(201);
+
+        /** @var array{id: string} $created */
+        $created = $this->json();
+
+        $this->client->request('DELETE', sprintf('/api/conversations/%s/messages/%s', $conversationId, $created['id']));
+
+        self::assertResponseStatusCodeSame(204);
+
+        $attachedCount = $this->connection->fetchOne(
+            'SELECT count(*) FROM message_media WHERE message_id = :message_id',
+            ['message_id' => $created['id']],
+        );
+
+        // `fetchOne` rend `mixed` : on restreint avant de convertir.
+        self::assertIsNumeric($attachedCount);
+        self::assertSame(0, (int) $attachedCount, 'Supprimer pour tous doit detacher les medias en base, pas seulement dans l\'agregat.');
     }
 
     /**
