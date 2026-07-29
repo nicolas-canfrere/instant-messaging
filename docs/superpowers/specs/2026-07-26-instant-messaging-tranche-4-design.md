@@ -544,6 +544,9 @@ requiert un titre » en T1.
 
 ### 8.3 Deux entrées au catalogue RFC 7807
 
+> **Supersédé lors de la tâche 6 (ruling A) : voir la note en fin de section.** La ligne
+> `MediaNotOwnedException` / 403 ci-dessous ne correspond plus au comportement implémenté.
+
 | Exception | Statut | `type` |
 |---|---|---|
 | `MediaNotOwnedException` | **403** | `/problems/media-not-owned` |
@@ -551,6 +554,14 @@ requiert un titre » en T1.
 
 Elles implémentent `ForbiddenExceptionInterface` et `ConflictExceptionInterface` : le
 `ProblemDetailsListener` n'est pas modifié.
+
+> **Note post-implémentation (tâche 6).** Un 403 confirmerait l'existence du média à quelqu'un
+> qui n'y a aucun droit — un oracle d'énumération. La décision retenue : un média inconnu et un
+> média appartenant à quelqu'un d'autre sont indistinguables pour l'appelant, tous deux
+> `MediaNotFoundException` (**404**, `/problems/resource-not-found`). `MediaNotOwnedException`
+> a été supprimée. `MediaAlreadyAttachedException` a par ailleurs été déplacée dans le domaine
+> `Message` (voir la tâche 6, finding 1) : c'est `Message` qui possède `message_media`, la table
+> sur laquelle porte la règle. Son statut (409) et son `type` restent inchangés.
 
 Un `media_id` **inexistant** rend **404 `/problems/resource-not-found`**, indistinguable d'un média
 appartenant à quelqu'un d'autre qui n'existe pas. Un type hors allowlist sort déjà en
@@ -611,7 +622,7 @@ dire que l'erreur attendue est une **expiration**, pas une image cassée.
 | Unitaire inspection | `GdImageInspector` sur de vrais fichiers : JPEG valide, PHP renommé `.jpg`, GIF tronqué, image de 12 Mio |
 | Unitaire front | `messagesReducer` — `MEDIA_READY` sur un message présent, absent, déjà `ready` |
 | Fonctionnel | flux complet contre un MinIO éphémère (`compose.test.yaml`) : pré-signature, `PUT`, confirmation, traitement, envoi, lecture |
-| Fonctionnel | attacher le média d'un autre → 403 ; attacher deux fois → 409 ; média inconnu → 404 |
+| Fonctionnel | attacher le média d'un autre → 404 (supersède le 403 initialement prévu ici, voir §8.3) ; attacher deux fois → 409 ; média inconnu → 404 |
 | Fonctionnel | message sans texte **ni** média → 422 ; message sans texte **avec** média → 201 |
 | Messenger | `zenstruck/messenger-test` : `ProcessMediaCommand` part à la confirmation, **une seule fois** sur rejeu |
 | Publication | `EventPublisher` espion : topic **et** charge utile de `message.media_ready`, notamment qu'aucune clé de stockage n'y figure |
@@ -665,7 +676,8 @@ purge (§7.3) · rejeu manuel d'un traitement échoué depuis l'interface.
 3. Un fichier PHP renommé `photo.jpg` est accepté au transfert et refusé au traitement : les deux
    voient « fichier refusé », et l'objet a disparu du bucket.
 4. Un message sans texte ni image rend 422 ; un message sans texte avec une image rend 201.
-5. Attacher le média d'un autre rend 403 `/problems/media-not-owned` ; l'attacher deux fois rend 409.
+5. Attacher le média d'un autre rend **404** `/problems/resource-not-found` (supersède le 403
+   `/problems/media-not-owned` initialement prévu ici, voir §8.3) ; l'attacher deux fois rend 409.
 6. Carol, non membre de la conversation, n'obtient aucune URL signée — et l'URL récupérée par Bob
    cesse de fonctionner passé 15 minutes.
 7. Rejouer `POST /api/media/{id}/uploaded` rend 204 et ne produit **aucun** second traitement.
