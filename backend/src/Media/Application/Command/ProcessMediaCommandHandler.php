@@ -67,10 +67,20 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
             // La taille AVANT tout le reste : rien ne plafonne un PUT pre-signe
             // (spec T4 §3.2), donc un objet de 2 Gio peut atterrir dans le bucket.
             // Le detecter avant de lire quoi que ce soit evite de le charger.
-            $byteSize = filesize($localPath);
+            // `@` parce que filesize() emet un warning PHP quand le fichier a
+            // disparu, et `failOnWarning` est actif dans la suite de tests.
+            $byteSize = @filesize($localPath);
 
             if (false === $byteSize) {
-                $this->reject($media, MediaRejectionReason::MissingObject, $now, eraseBytes: false);
+                // A ce stade le telechargement a deja reussi (sinon on ne
+                // serait pas dans ce try) : l'objet EST dans le bucket, donc
+                // MissingObject mentirait. C'est le fichier temporaire local
+                // qui a disparu entre le telechargement et cette lecture
+                // (course avec un nettoyage concurrent, permissions) — un
+                // decodage rate au sens large, pas une absence d'objet.
+                // eraseBytes:true parce que les octets sont toujours dans le
+                // bucket et doivent etre purges comme tout rejet.
+                $this->reject($media, MediaRejectionReason::Undecodable, $now, eraseBytes: true);
 
                 return;
             }

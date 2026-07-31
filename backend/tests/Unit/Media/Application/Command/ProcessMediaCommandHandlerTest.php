@@ -100,6 +100,38 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         self::assertSame(0, $detector->detectCallCount());
     }
 
+    public function testALocalFileVanishingBeforeInspectionIsRejectedAsUndecodableAndItsBytesArePurged(): void
+    {
+        // Le telechargement a deja reussi (c'est `downloadToTemporaryFile`
+        // qui rend ce chemin) : l'objet EST dans le bucket. Ce test simule sa
+        // disparition locale APRES le telechargement mais AVANT la lecture de
+        // sa taille — un chemin qui pointe vers rien. `MissingObject`
+        // mentirait ici, et `eraseBytes:false` laisserait les octets orphelins
+        // dans le bucket : c'est pourquoi ce cas doit rejeter avec
+        // `Undecodable` et purger.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090004');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = sprintf('%s/media-test-disparu-%s', sys_get_temp_dir(), $mediaId->toString());
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createMock(MimeTypeDetectorInterface::class);
+        $detector->expects(self::never())->method('detect');
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::Undecodable, $media->rejectionReason());
+    }
+
     public function testARedeliveredMessageForAnAlreadyTerminalMediaDoesNothing(): void
     {
         $mediaId = MediaId::fromString('01JQZ000000000000000090002');

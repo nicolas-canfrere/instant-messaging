@@ -12,6 +12,8 @@ final readonly class FinfoMimeTypeDetector implements MimeTypeDetectorInterface
 {
     public function detect(string $localPath): MediaMimeType|MediaRejectionReason
     {
+        // `@` parce que finfo::file() emet un warning PHP sur un fichier
+        // manquant, et `failOnWarning` est actif dans la suite de tests.
         $detected = @(new \finfo(FILEINFO_MIME_TYPE))->file($localPath);
 
         if (false === $detected) {
