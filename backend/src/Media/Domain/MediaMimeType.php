@@ -18,6 +18,7 @@ enum MediaMimeType: string
     case Png = 'image/png';
     case Webp = 'image/webp';
     case Gif = 'image/gif';
+    case Text = 'text/plain';
 
     /** @return list<string> */
     public static function values(): array
@@ -32,6 +33,15 @@ enum MediaMimeType: string
             self::Png => 'png',
             self::Webp => 'webp',
             self::Gif => 'gif',
+            self::Text => 'txt',
+        };
+    }
+
+    public function family(): MediaFamily
+    {
+        return match ($this) {
+            self::Jpeg, self::Png, self::Webp, self::Gif => MediaFamily::Image,
+            self::Text => MediaFamily::Document,
         };
     }
 }

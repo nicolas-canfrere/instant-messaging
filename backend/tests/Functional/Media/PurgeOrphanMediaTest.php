@@ -179,7 +179,7 @@ final class PurgeOrphanMediaTest extends DatabaseTestCase
 
         if (MediaStatus::Ready === $status) {
             $thumbnailKey = StorageKey::forThumbnail($mediaId);
-            $media->markReady(MediaMimeType::Jpeg, 1_600, 900, 2_000, $thumbnailKey, $createdAt);
+            $media->markImageReady(MediaMimeType::Jpeg, 1_600, 900, 2_000, $thumbnailKey, $createdAt);
             $this->repository()->save($media);
             $this->storage()->put($thumbnailKey, self::FIXTURES . 'valide.jpg', MediaMimeType::Jpeg);
         } elseif (MediaStatus::Processing === $status) {

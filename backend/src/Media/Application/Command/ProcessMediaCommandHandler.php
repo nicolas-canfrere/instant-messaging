@@ -7,6 +7,7 @@ namespace App\Media\Application\Command;
 use App\Media\Application\ImageInspectorInterface;
 use App\Media\Application\MediaStorageInterface;
 use App\Media\Application\MimeTypeDetectorInterface;
+use App\Media\Domain\MediaFamily;
 use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
@@ -37,9 +38,9 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
         // operationnel normal, pas un echec : sans ce garde-fou en tete de
         // methode, chaque redelivrage refait un telechargement, une
         // inspection ET un putObject de miniature avant que
-        // `MediaObject::markReady()`/`markRejected()` ne leve — deux
-        // aller-retours S3 gaspilles, puis le message finit quand meme en
-        // echec dans le transport `failed`.
+        // `MediaObject::markImageReady()`/`markDocumentReady()`/`markRejected()`
+        // ne leve — deux aller-retours S3 gaspilles, puis le message finit
+        // quand meme en echec dans le transport `failed`.
         if ($media->status()->isTerminal()) {
             $this->logger->notice('Media {media_id} deja traite, redelivrage ignore', [
                 'media_id' => $media->id()->toString(),
@@ -100,6 +101,20 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
                 return;
             }
 
+            if (MediaFamily::Document === $mimeType->family()) {
+                // Ni mesure ni miniature : un document n'en a pas (spec §3.3).
+                $media->markDocumentReady($mimeType, $byteSize, $now);
+                $this->media->save($media);
+
+                $this->logger->info('Media {media_id} pret', [
+                    'media_id' => $media->id()->toString(),
+                    'mime_type' => $mimeType->value,
+                    'byte_size' => $byteSize,
+                ]);
+
+                return;
+            }
+
             $dimensions = $this->inspector->measure($localPath);
 
             if ($dimensions instanceof MediaRejectionReason) {
@@ -114,7 +129,7 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
             $this->inspector->thumbnail($localPath, $thumbnailPath);
             $this->storage->put($thumbnailKey, $thumbnailPath, MediaMimeType::Jpeg);
 
-            $media->markReady($mimeType, $dimensions->width, $dimensions->height, $byteSize, $thumbnailKey, $now);
+            $media->markImageReady($mimeType, $dimensions->width, $dimensions->height, $byteSize, $thumbnailKey, $now);
             $this->media->save($media);
 
             if ($mimeType !== $media->declaredMimeType()) {

@@ -26,6 +26,7 @@ final class MessageMediaReadTest extends DatabaseTestCase
     private const string READY_MEDIA_ID = '01JQZ0000000000000000010AA';
     private const string PROCESSING_MEDIA_ID = '01JQZ0000000000000000011AA';
     private const string REJECTED_MEDIA_ID = '01JQZ0000000000000000012AA';
+    private const string READY_DOCUMENT_MEDIA_ID = '01JQZ0000000000000000013AA';
 
     private const string CLIENT_ID = '01J9ZQ7X8K3M4N5P6Q7R8S9TB1';
 
@@ -52,6 +53,28 @@ final class MessageMediaReadTest extends DatabaseTestCase
         self::assertIsString($media['thumbnail_url']);
         self::assertStringContainsString('X-Amz-Signature=', $media['thumbnail_url']);
         self::assertStringContainsString('-thumb.jpg', $media['thumbnail_url']);
+    }
+
+    /**
+     * La miniature ne peut plus servir de temoin de « servable » : un
+     * document pret n'en a jamais. C'est le statut qui doit trancher.
+     */
+    public function testAReadyDocumentIsServedWithoutAThumbnail(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+        $this->createDocumentMedia(self::READY_DOCUMENT_MEDIA_ID, $this->userId('alice'));
+
+        $this->sendWithMedia($conversationId, self::CLIENT_ID, self::READY_DOCUMENT_MEDIA_ID);
+
+        $media = $this->firstMediaOfLatestMessage($conversationId);
+
+        self::assertSame('ready', $media['status']);
+        self::assertIsString($media['url']);
+        self::assertStringContainsString('X-Amz-Signature=', $media['url']);
+        self::assertNull($media['thumbnail_url']);
+        self::assertNull($media['width']);
+        self::assertNull($media['height']);
     }
 
     public function testAMediaStillProcessingCarriesNoUrlAtAll(): void
@@ -174,7 +197,7 @@ final class MessageMediaReadTest extends DatabaseTestCase
         $media->markUploaded($now);
 
         match ($status) {
-            MediaStatus::Ready => $media->markReady(
+            MediaStatus::Ready => $media->markImageReady(
                 MediaMimeType::Jpeg,
                 800,
                 600,
@@ -186,6 +209,34 @@ final class MessageMediaReadTest extends DatabaseTestCase
             default => null,
         };
 
+        $repository->save($media);
+    }
+
+    /**
+     * Un document pret, seme directement en base : ni mesure ni miniature,
+     * conformement au CHECK `media_ready_is_measured`.
+     */
+    private function createDocumentMedia(string $mediaIdString, string $ownerId): void
+    {
+        /** @var MediaRepositoryInterface $repository */
+        $repository = static::getContainer()->get(MediaRepositoryInterface::class);
+
+        $mediaId = MediaId::fromString($mediaIdString);
+        $now = new \DateTimeImmutable('2026-07-26T09:00:00+00:00');
+
+        $media = MediaObject::request(
+            $mediaId,
+            UserId::fromString($ownerId),
+            StorageKey::forOriginal($mediaId, MediaMimeType::Text),
+            OriginalFilename::fromString('notes.txt'),
+            MediaMimeType::Text,
+            2_000,
+            $now,
+        );
+        $repository->add($media);
+
+        $media->markUploaded($now);
+        $media->markDocumentReady(MediaMimeType::Text, 2_000, $now);
         $repository->save($media);
     }
 

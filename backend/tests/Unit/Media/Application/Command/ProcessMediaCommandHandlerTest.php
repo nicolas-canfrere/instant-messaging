@@ -136,7 +136,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
     {
         $mediaId = MediaId::fromString('01JQZ000000000000000090002');
         $media = $this->uploadedMedia($mediaId);
-        $media->markReady(
+        $media->markImageReady(
             MediaMimeType::Jpeg,
             1600,
             900,
@@ -180,6 +180,37 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         // L'agregat ressort inchange : toujours Ready, meme miniature.
         self::assertSame(MediaStatus::Ready, $media->status());
         self::assertSame(1600, $media->width());
+    }
+
+    public function testADocumentIsMarkedReadyWithoutMeasurementOrThumbnail(): void
+    {
+        $mediaId = MediaId::fromString('01JQZ000000000000000090005');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        // Ni mesure ni miniature pour un document : `put()` ne doit jamais
+        // etre atteint.
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::never())->method('delete');
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Text);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+        $inspector->expects(self::never())->method('thumbnail');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Ready, $media->status());
+        self::assertSame(MediaMimeType::Text, $media->mimeType());
+        self::assertNull($media->width());
+        self::assertNull($media->height());
+        self::assertNull($media->thumbnailKey());
     }
 
     private function uploadedMedia(MediaId $mediaId): MediaObject
