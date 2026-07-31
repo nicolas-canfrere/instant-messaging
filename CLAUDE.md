@@ -32,8 +32,15 @@ T2 accusés & présence · T3 édition/suppression · T4 médias · T5 recherche
 
 ## Infrastructure
 
-5 conteneurs : `caddy` (origine unique, `localhost:8080`) · `backend` (FrankenPHP) ·
-`frontend` (Vite) · `mercure` · `postgres`.
+9 conteneurs : `caddy` (origine unique, `localhost:8080`) · `backend` (FrankenPHP) ·
+`frontend` (Vite) · `mercure` · `postgres` · `redis` (présence éphémère, sans volume) ·
+`minio` (stockage objet) · `rabbitmq` (transport Messenger) · `worker` (consomme la file
+`media` : inspection des octets et miniature).
+
+**Caddy proxifie `/messaging-media/*` vers MinIO en préservant le `Host`.** Le navigateur
+téléverse donc en *same-origin* : ni CORS sur le bucket, ni entrée dans `/etc/hosts`. Le nom
+du bucket sert de préfixe de chemin, ce que `use_path_style_endpoint` donne déjà — aucune
+réécriture d'URL, donc aucune signature cassée. Défaire ce routage casse tous les téléversements.
 
 Le hub Mercure reste un **service séparé** — c'est la leçon centrale du projet, on ne le
 fusionne pas dans FrankenPHP. Et le **worker mode de FrankenPHP est désactivé** : un process
@@ -51,7 +58,7 @@ backend/src/<Contexte>/
 └── Infrastructure/   # Http/, Persistence/ — les adaptateurs
 ```
 
-Contextes : `Identity` · `Conversation` · `Message` · `Realtime` · `Shared`.
+Contextes : `Identity` · `Conversation` · `Message` · `Media` · `Realtime` · `Shared`.
 Ils communiquent **par identifiants**, jamais en référençant le `Domain` d'un autre contexte.
 
 Règle de dépendance : `Infrastructure` → `Application` → `Domain`. Jamais l'inverse.
@@ -336,6 +343,10 @@ S'il manque une cible, passer par `docker compose run --rm <service> <cmd>` et l
 
 ## Périmètre
 
-Tranche 1 en cours : noyau temps réel + conversations. **Ne pas déborder** sur les tranches
-suivantes (accusés de lecture, présence, édition/suppression, médias, recherche, modération)
-— chacune aura sa spec. Voir la section « Hors périmètre » de la spec T1.
+Tranches 1 à 4 livrées. **Tranche 5 en cours : recherche & modération.** Ne pas déborder —
+elle a sa spec, comme les précédentes.
+
+Les **aperçus de liens** (et la défense SSRF qui va avec) sont une tranche à part entière, pas
+un appendice de T4 : ne pas les commencer ici. Voir la section « Ce que cette tranche ne fait
+délibérément pas » de la spec T4 pour le reste de ce qui a été écarté — vidéo et audio,
+plusieurs résolutions, CDN, antivirus, quotas, chiffrement au repos, planificateur de purge.

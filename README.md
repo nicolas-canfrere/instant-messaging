@@ -112,16 +112,30 @@ flowchart LR
     Mercure["mercure<br/>hub, separate on purpose"]
     Postgres[("postgres")]
     Redis[("redis<br/>presence only, no volume")]
+    Minio[("minio<br/>object storage")]
+    Rabbit["rabbitmq"]
+    Worker["worker<br/>inspects bytes, makes thumbnails"]
 
     Browser -->|"HTTP"| Caddy
     Caddy -->|"/api/*"| Backend
     Caddy -->|"/.well-known/mercure*"| Mercure
+    Caddy -->|"/messaging-media/*, Host preserved"| Minio
     Caddy -->|"everything else"| Vite["frontend<br/>Vite dev server"]
     Backend -->|"publish, after commit"| Mercure
     Backend --> Postgres
     Backend -->|"SETEX / MGET, 30 s TTL"| Redis
+    Backend -->|"presigns only, never the bytes"| Minio
+    Backend -->|"queues media jobs"| Rabbit
+    Rabbit --> Worker
+    Worker --> Minio
+    Browser -->|"PUT / GET, presigned, same origin"| Caddy
     Mercure -.->|"SSE"| Browser
 ```
+
+Image bytes go straight from the browser to the object store and back, **never through PHP**.
+Caddy proxies `/messaging-media/*` to MinIO with the `Host` preserved, so the presigned upload
+is same-origin: no CORS on the bucket, no `/etc/hosts` entry, and no rewritten URL to break the
+signature.
 
 The sixth container, `redis`, holds **no durable data** and has **no volume, deliberately**.
 Presence that survived a restart would claim people are online when nobody knows that any
@@ -211,6 +225,24 @@ it appears on the other side without a reload, pushed by the hub.
 | `make migrate`              | Run the migrations on the dev database                   |
 | `make php-cli`              | A shell inside the backend container                     |
 
+Two admin consoles are published for convenience while developing:
+
+| URL                                              | What                                     |
+| ------------------------------------------------ | ---------------------------------------- |
+| <http://localhost:9001>                           | MinIO console — browse the media bucket  |
+| <http://localhost:15672>                          | RabbitMQ console — watch the media queue |
+
+Media that no message carries — an abandoned upload, or the leftovers of a message deleted for
+everyone — are swept by an explicit command. There is no scheduler in this project, so it is
+run by hand:
+
+```bash
+docker compose run --rm backend bin/console media:purge-orphans
+```
+
+It removes the bytes first and the row second: if deleting the object fails, the row stays and
+the next run retries. The other order would leave bytes nothing references — invisible forever.
+
 ---
 
 ## Quality gates
@@ -238,7 +270,7 @@ make front-test             # Vitest
 
 ## Roadmap
 
-The project is cut into five slices, each with its own spec and plan. **Slices 1 to 3 are
+The project is cut into five slices, each with its own spec and plan. **Slices 1 to 4 are
 delivered**; nothing outside them is implemented yet.
 
 1. **Real-time core and conversations** — send, receive, list, paginate *(delivered)*
@@ -246,8 +278,9 @@ delivered**; nothing outside them is implemented yet.
    *(delivered)*
 3. **Message lifecycle** — delete for everyone, edit within 15 minutes, reader-local dates
    *(delivered)*
-4. Media *(next)*
-5. Search and moderation
+4. **Media** — presigned direct upload, asynchronous inspection, thumbnails, orphan sweep
+   *(delivered)*
+5. Search and moderation *(next)*
 
 ---
 

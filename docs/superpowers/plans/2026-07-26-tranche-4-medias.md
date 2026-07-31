@@ -135,14 +135,14 @@ Tâche délibérément **inerte côté applicatif** : elle porte tout le changem
 - Consumes: rien.
 - Produces: les variables d'environnement `MEDIA_BUCKET`, `MEDIA_S3_INTERNAL_ENDPOINT`, `MEDIA_S3_PUBLIC_ENDPOINT`, `MEDIA_S3_KEY`, `MEDIA_S3_SECRET`, `MESSENGER_TRANSPORT_DSN` — consommées par les tâches 4 et 5. Le transport Messenger nommé `media`, consommé par la tâche 5. Les couches deptrac `Media` et `MediaContract`, consommées par toutes les suivantes.
 
-- [ ] **Step 1: Ajouter les trois paquets**
+- [x] **Step 1: Ajouter les trois paquets**
 
 ```bash
 make composer-req PACKAGES="aws/aws-sdk-php symfony/amqp-messenger"
 make composer-req PACKAGES="zenstruck/messenger-test --dev"
 ```
 
-- [ ] **Step 2: Déclarer les extensions dans `composer.json`**
+- [x] **Step 2: Déclarer les extensions dans `composer.json`**
 
 Dans le bloc `require`, à leur place alphabétique parmi les `ext-*` existants :
 
@@ -157,7 +157,7 @@ Dans le bloc `require`, à leur place alphabétique parmi les `ext-*` existants 
 
 Les déclarer rend la dépendance vérifiable par `composer check-platform-reqs` au lieu de tomber à l'exécution.
 
-- [ ] **Step 3: Installer les extensions dans l'image**
+- [x] **Step 3: Installer les extensions dans l'image**
 
 Dans `backend/Dockerfile`, le bloc `install-php-extensions` devient :
 
@@ -181,7 +181,7 @@ RUN install-php-extensions \
         zip
 ```
 
-- [ ] **Step 4: Reconstruire l'image et vérifier les extensions**
+- [x] **Step 4: Reconstruire l'image et vérifier les extensions**
 
 ```bash
 make build
@@ -190,7 +190,7 @@ docker compose run --rm --no-deps backend php -m | grep -E '^(amqp|gd|fileinfo)$
 
 Expected : les trois lignes `amqp`, `fileinfo`, `gd`.
 
-- [ ] **Step 5: Écrire la topologie RabbitMQ**
+- [x] **Step 5: Écrire la topologie RabbitMQ**
 
 `infra/rabbitmq/rabbitmq.conf` :
 
@@ -264,7 +264,7 @@ docker run --rm rabbitmq:4-management rabbitmqctl hash_password app
 
 Coller la valeur rendue dans `password_hash`. Un hash qui ne correspond pas fait échouer l'authentification du worker **au premier message**, pas au démarrage.
 
-- [ ] **Step 6: Ajouter les conteneurs**
+- [x] **Step 6: Ajouter les conteneurs**
 
 Dans `compose.yaml`, après le service `redis` :
 
@@ -360,7 +360,7 @@ Dans `compose.yaml`, après le service `redis` :
 
 Le service `backend` gagne les mêmes cinq variables `MEDIA_*` et `MESSENGER_TRANSPORT_DSN`. Le bloc `volumes:` de fin gagne `minio_data:` et `rabbitmq_data:`.
 
-- [ ] **Step 7: Ajouter les variables d'environnement**
+- [x] **Step 7: Ajouter les variables d'environnement**
 
 Dans `.env` **et** `.env.example` :
 
@@ -378,7 +378,7 @@ MEDIA_S3_SECRET=minioadmin
 MESSENGER_TRANSPORT_DSN=amqp://app:app@rabbitmq:5672/%2f
 ```
 
-- [ ] **Step 8: Router le stockage derrière l'origine unique**
+- [x] **Step 8: Router le stockage derrière l'origine unique**
 
 Dans `infra/caddy/Caddyfile`, **avant** le `handle` fourre-tout :
 
@@ -397,7 +397,7 @@ Dans `infra/caddy/Caddyfile`, **avant** le `handle` fourre-tout :
 	}
 ```
 
-- [ ] **Step 9: Déclarer le transport Messenger**
+- [x] **Step 9: Déclarer le transport Messenger**
 
 Dans `backend/config/packages/messenger.yaml`, remplacer le bloc `transports` et ajouter `routing` :
 
@@ -442,7 +442,7 @@ when@test:
                 failed: 'in-memory://'
 ```
 
-- [ ] **Step 10: Ouvrir les deux couches deptrac**
+- [x] **Step 10: Ouvrir les deux couches deptrac**
 
 Dans `backend/deptrac.yaml`, la couche `Vendor` doit connaître `Aws` — sans quoi `--fail-on-uncovered` échoue au premier `use Aws\S3\S3Client` :
 
@@ -482,7 +482,7 @@ Dans `backend/deptrac-contexts.yaml`, même correction sur `Vendor`, puis deux c
         Message: [Shared, ConversationContract, MessageContract, MediaContract, Vendor]
 ```
 
-- [ ] **Step 11: Refléter la stack de test**
+- [x] **Step 11: Refléter la stack de test**
 
 Dans `compose.test.yaml`, `backend-test` gagne les cinq `MEDIA_*` — en pointant vers un MinIO de test — et un service `minio-test` calqué sur `minio` (sans port publié, sans volume : les octets de test sont jetables) :
 
@@ -530,7 +530,7 @@ et la commande enchaînée crée le bucket avant les tests :
 
 Le bucket est créé par le code, pas par `mc` : `S3MediaStorage` (tâche 4) appelle `createBucket` si absent au démarrage en environnement de test. **Ne pas ajouter de conteneur `mc` à la stack de test** — un one-shot supplémentaire à attendre pour chaque exécution.
 
-- [ ] **Step 12: Lever la stack et vérifier**
+- [x] **Step 12: Lever la stack et vérifier**
 
 ```bash
 make up
@@ -545,7 +545,7 @@ docker compose logs worker --tail=20
 
 Expected : aucune erreur d'authentification AMQP, le consumer attend des messages.
 
-- [ ] **Step 13: Vérifier que le routage Caddy atteint MinIO**
+- [x] **Step 13: Vérifier que le routage Caddy atteint MinIO**
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/messaging-media/
@@ -553,7 +553,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/messaging-media/
 
 Expected : `403` — MinIO répond, et refuse un accès non signé. Un `502` signifierait que Caddy n'atteint pas le conteneur ; un `404` que le `handle` est placé après le fourre-tout.
 
-- [ ] **Step 14: Les quatre portes**
+- [x] **Step 14: Les quatre portes**
 
 ```bash
 make static-code-analysis && make check-cs && make deptrac && make test
@@ -561,7 +561,7 @@ make static-code-analysis && make check-cs && make deptrac && make test
 
 Expected : les quatre vertes. `deptrac` en particulier : les nouvelles couches sont déclarées mais encore vides, ce qui est valide.
 
-- [ ] **Step 15: Commit**
+- [x] **Step 15: Commit**
 
 ```bash
 git add backend/composer.json backend/composer.lock backend/Dockerfile backend/config/packages/messenger.yaml \
@@ -600,7 +600,7 @@ PHP pur, zéro dépendance, testable sans conteneur de base. C'est ici que viven
   - `MediaObject::MAX_BYTES` (int), `::request(...)`, `->markUploaded(...)`, `->markReady(...)`, `->markRejected(...)`, `::reconstitute(...)`, et les accesseurs `id() ownerId() storageKey() thumbnailKey() status() declaredMimeType() declaredSize() mimeType() width() height() byteSize() rejectionReason() createdAt() processedAt()`
   - `MediaRepositoryInterface::{add, ofId, save}`
 
-- [ ] **Step 1: Écrire les tests de `StorageKey` et `MediaMimeType`**
+- [x] **Step 1: Écrire les tests de `StorageKey` et `MediaMimeType`**
 
 `backend/tests/Unit/Media/Domain/StorageKeyTest.php` :
 
@@ -690,7 +690,7 @@ final class MediaMimeTypeTest extends TestCase
 }
 ```
 
-- [ ] **Step 2: Lancer les tests, vérifier qu'ils échouent**
+- [x] **Step 2: Lancer les tests, vérifier qu'ils échouent**
 
 ```bash
 make unit-test ARGS="--filter='StorageKeyTest|MediaMimeTypeTest'"
@@ -698,7 +698,7 @@ make unit-test ARGS="--filter='StorageKeyTest|MediaMimeTypeTest'"
 
 Expected : FAIL — `Class "App\Media\Domain\StorageKey" not found`.
 
-- [ ] **Step 3: Écrire `MediaId`, les enums et `StorageKey`**
+- [x] **Step 3: Écrire `MediaId`, les enums et `StorageKey`**
 
 `backend/src/Shared/Domain/Identifier/MediaId.php` :
 
@@ -881,7 +881,7 @@ final readonly class StorageKey implements \Stringable
 }
 ```
 
-- [ ] **Step 4: Relancer les deux tests**
+- [x] **Step 4: Relancer les deux tests**
 
 ```bash
 make unit-test ARGS="--filter='StorageKeyTest|MediaMimeTypeTest'"
@@ -889,7 +889,7 @@ make unit-test ARGS="--filter='StorageKeyTest|MediaMimeTypeTest'"
 
 Expected : PASS.
 
-- [ ] **Step 5: Écrire le test de l'agrégat**
+- [x] **Step 5: Écrire le test de l'agrégat**
 
 `backend/tests/Unit/Media/Domain/MediaObjectTest.php` :
 
@@ -1075,7 +1075,7 @@ final class MediaObjectTest extends TestCase
 }
 ```
 
-- [ ] **Step 6: Lancer, vérifier l'échec**
+- [x] **Step 6: Lancer, vérifier l'échec**
 
 ```bash
 make unit-test ARGS="--filter=MediaObjectTest"
@@ -1083,7 +1083,7 @@ make unit-test ARGS="--filter=MediaObjectTest"
 
 Expected : FAIL — `Class "App\Media\Domain\MediaObject" not found`.
 
-- [ ] **Step 7: Écrire l'événement partagé**
+- [x] **Step 7: Écrire l'événement partagé**
 
 `backend/src/Shared/Domain/Event/MediaWasProcessed.php` :
 
@@ -1123,7 +1123,7 @@ final readonly class MediaWasProcessed implements DomainEventInterface
 }
 ```
 
-- [ ] **Step 8: Écrire l'agrégat et ses exceptions**
+- [x] **Step 8: Écrire l'agrégat et ses exceptions**
 
 `backend/src/Media/Domain/InvalidMediaTransitionException.php` :
 
@@ -1439,7 +1439,7 @@ interface MediaRepositoryInterface
 }
 ```
 
-- [ ] **Step 9: Relancer les tests unitaires du domaine**
+- [x] **Step 9: Relancer les tests unitaires du domaine**
 
 ```bash
 make unit-test ARGS="--filter='MediaObjectTest|StorageKeyTest|MediaMimeTypeTest'"
@@ -1447,7 +1447,7 @@ make unit-test ARGS="--filter='MediaObjectTest|StorageKeyTest|MediaMimeTypeTest'
 
 Expected : PASS, 12 tests.
 
-- [ ] **Step 10: Les quatre portes**
+- [x] **Step 10: Les quatre portes**
 
 ```bash
 make static-code-analysis && make check-cs && make deptrac && make test
@@ -1455,7 +1455,7 @@ make static-code-analysis && make check-cs && make deptrac && make test
 
 `deptrac` est le contrôle qui compte ici : `Media/Domain/` ne doit citer que `App\Shared\Domain\…`. Un seul `use Symfony\` ou `use Aws\` fait échouer le build.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add backend/src/Shared/Domain/Identifier/MediaId.php backend/src/Shared/Domain/Event/MediaWasProcessed.php \
@@ -1487,13 +1487,13 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Produces: `MediaMapper::fromRow(array): MediaObject` avec la forme de ligne
   `array{id: string, owner_id: string, storage_key: string, thumbnail_key: string|null, status: string, declared_mime_type: string, declared_size: int, mime_type: string|null, width: int|null, height: int|null, byte_size: int|null, rejection_reason: string|null, created_at: string, processed_at: string|null}` — **cette forme est réutilisée telle quelle** par les tâches 4, 5 et 11.
 
-- [ ] **Step 1: Générer la migration**
+- [x] **Step 1: Générer la migration**
 
 ```bash
 make generate-migration
 ```
 
-- [ ] **Step 2: Écrire le SQL de la migration**
+- [x] **Step 2: Écrire le SQL de la migration**
 
 Dans la classe générée. `getDescription()` d'abord, puis `up()` et `down()` :
 
@@ -1583,7 +1583,7 @@ Dans la classe générée. `getDescription()` d'abord, puis `up()` et `down()` :
     }
 ```
 
-- [ ] **Step 3: Jouer la migration sur la base de dev**
+- [x] **Step 3: Jouer la migration sur la base de dev**
 
 ```bash
 make migrate
@@ -1592,7 +1592,7 @@ make migration-status
 
 Expected : la nouvelle version en `migrated`.
 
-- [ ] **Step 4: Écrire le test fonctionnel du repository**
+- [x] **Step 4: Écrire le test fonctionnel du repository**
 
 `backend/tests/Functional/Media/MediaRepositoryTest.php` — calqué sur les tests fonctionnels existants (`WebTestCase`, conteneur réel, vraie base) :
 
@@ -1710,7 +1710,7 @@ final class MediaRepositoryTest extends KernelTestCase
 }
 ```
 
-- [ ] **Step 5: Lancer, vérifier l'échec**
+- [x] **Step 5: Lancer, vérifier l'échec**
 
 ```bash
 make functional-test ARGS="--filter=MediaRepositoryTest"
@@ -1718,7 +1718,7 @@ make functional-test ARGS="--filter=MediaRepositoryTest"
 
 Expected : FAIL — service `MediaRepositoryInterface` introuvable.
 
-- [ ] **Step 6: Écrire le mapper**
+- [x] **Step 6: Écrire le mapper**
 
 `backend/src/Media/Infrastructure/Persistence/MediaMapper.php` :
 
@@ -1770,7 +1770,7 @@ final readonly class MediaMapper
 }
 ```
 
-- [ ] **Step 7: Écrire le repository**
+- [x] **Step 7: Écrire le repository**
 
 `backend/src/Media/Infrastructure/Persistence/DbalMediaRepository.php` :
 
@@ -1874,7 +1874,7 @@ final readonly class DbalMediaRepository implements MediaRepositoryInterface
 }
 ```
 
-- [ ] **Step 8: Câbler le port**
+- [x] **Step 8: Câbler le port**
 
 Dans `backend/config/services.yaml`, à la suite des autres alias de ports :
 
@@ -1882,7 +1882,7 @@ Dans `backend/config/services.yaml`, à la suite des autres alias de ports :
     App\Media\Domain\MediaRepositoryInterface: '@App\Media\Infrastructure\Persistence\DbalMediaRepository'
 ```
 
-- [ ] **Step 9: Relancer le test fonctionnel**
+- [x] **Step 9: Relancer le test fonctionnel**
 
 ```bash
 make functional-test ARGS="--filter=MediaRepositoryTest"
@@ -1890,7 +1890,7 @@ make functional-test ARGS="--filter=MediaRepositoryTest"
 
 Expected : PASS, 3 tests.
 
-- [ ] **Step 10: Vérifier que T3 n'a rien perdu**
+- [x] **Step 10: Vérifier que T3 n'a rien perdu**
 
 ```bash
 make functional-test ARGS="--filter='DeleteMessageTest|EditMessageTest'"
@@ -1898,7 +1898,7 @@ make functional-test ARGS="--filter='DeleteMessageTest|EditMessageTest'"
 
 Expected : PASS. Le `CHECK` relâché ne doit rien casser des comportements de T3 — c'est le seul risque de cette migration.
 
-- [ ] **Step 11: Les quatre portes, puis commit**
+- [x] **Step 11: Les quatre portes, puis commit**
 
 ```bash
 make static-code-analysis && make check-cs && make deptrac && make test
@@ -1942,7 +1942,7 @@ C'est la tâche où « les octets ne passent jamais par PHP » devient du code. 
   - `MediaStorageInterface::delete(StorageKey): void`
   - `UploadTicket` : `readonly` avec `string $mediaId`, `string $uploadUrl`, `string $expiresAt`, `toArray(): array<string, string>`
 
-- [ ] **Step 1: Écrire le test fonctionnel du flux complet**
+- [x] **Step 1: Écrire le test fonctionnel du flux complet**
 
 `backend/tests/Functional/Media/UploadFlowTest.php` :
 
@@ -2075,7 +2075,7 @@ final class UploadFlowTest extends WebTestCase
 
 **Les helpers `loggedInAsAlice()` / `loggedInAsBob()` existent déjà** dans les tests fonctionnels de `Message` — reprendre exactement leur implémentation (fixtures `alice` / `bob`), ne pas en inventer une variante.
 
-- [ ] **Step 2: Lancer, vérifier l'échec**
+- [x] **Step 2: Lancer, vérifier l'échec**
 
 ```bash
 make functional-test ARGS="--filter=UploadFlowTest"
@@ -2083,7 +2083,7 @@ make functional-test ARGS="--filter=UploadFlowTest"
 
 Expected : FAIL — 404 sur `/api/media`, la route n'existe pas.
 
-- [ ] **Step 3: Écrire le port de stockage**
+- [x] **Step 3: Écrire le port de stockage**
 
 `backend/src/Media/Application/MediaStorageInterface.php` :
 
@@ -2133,7 +2133,7 @@ interface MediaStorageInterface
 }
 ```
 
-- [ ] **Step 4: Écrire l'adaptateur S3**
+- [x] **Step 4: Écrire l'adaptateur S3**
 
 `backend/src/Media/Infrastructure/Storage/S3MediaStorage.php` :
 
@@ -2262,7 +2262,7 @@ final readonly class S3MediaStorage implements MediaStorageInterface
 }
 ```
 
-- [ ] **Step 5: Câbler les deux clients**
+- [x] **Step 5: Câbler les deux clients**
 
 Dans `backend/config/services.yaml` :
 
@@ -2302,7 +2302,7 @@ Dans `backend/config/services.yaml` :
     App\Media\Application\MediaStorageInterface: '@App\Media\Infrastructure\Storage\S3MediaStorage'
 ```
 
-- [ ] **Step 6: Écrire les deux commandes et leurs handlers**
+- [x] **Step 6: Écrire les deux commandes et leurs handlers**
 
 `RequestMediaUploadCommand.php` :
 
@@ -2473,7 +2473,7 @@ final readonly class ConfirmMediaUploadCommandHandler implements CommandHandlerI
 
 > `ProcessMediaCommand` est écrite à la tâche 5. Pour que cette tâche-ci reste verte, **la créer maintenant** comme une commande vide de comportement (fichier `ProcessMediaCommand.php` seul, sans handler) : le transport `media` est déclaré, un message sans handler côté worker est simplement consommé et jeté. Le handler arrive à la tâche suivante.
 
-- [ ] **Step 7: Écrire la query du ticket**
+- [x] **Step 7: Écrire la query du ticket**
 
 `UploadTicket.php` :
 
@@ -2646,7 +2646,7 @@ final readonly class DbalUploadTicketReader implements UploadTicketReaderInterfa
 }
 ```
 
-- [ ] **Step 8: Écrire le payload et les deux contrôleurs**
+- [x] **Step 8: Écrire le payload et les deux contrôleurs**
 
 `Payload/PresignUploadPayload.php` :
 
@@ -2790,13 +2790,13 @@ final readonly class ConfirmMediaUploadController
 }
 ```
 
-- [ ] **Step 9: Câbler le reader**
+- [x] **Step 9: Câbler le reader**
 
 ```yaml
     App\Media\Application\Query\UploadTicketReaderInterface: '@App\Media\Infrastructure\Persistence\DbalUploadTicketReader'
 ```
 
-- [ ] **Step 10: Relancer le test fonctionnel**
+- [x] **Step 10: Relancer le test fonctionnel**
 
 ```bash
 make functional-test ARGS="--filter=UploadFlowTest"
@@ -2804,7 +2804,7 @@ make functional-test ARGS="--filter=UploadFlowTest"
 
 Expected : PASS, 6 tests.
 
-- [ ] **Step 11: Vérifier le flux réel, hors tests**
+- [x] **Step 11: Vérifier le flux réel, hors tests**
 
 C'est la vérification qui compte : un vrai `PUT` de bout en bout.
 
@@ -2832,11 +2832,11 @@ Expected : `200`. Puis ouvrir `http://localhost:9001` (console MinIO, `minioadmi
 
 Si `403 SignatureDoesNotMatch` : le `Content-Type` envoyé ne correspond pas à celui signé, ou Caddy ne préserve pas le `Host`.
 
-- [ ] **Step 12: Vérifier que l'expiration marche vraiment**
+- [x] **Step 12: Vérifier que l'expiration marche vraiment**
 
 Le comportement qu'on cherche à observer, donc à provoquer. Passer temporairement `S3MediaStorage::UPLOAD_TTL` à `'+30 seconds'`, rejouer les étapes 1 et 2 après avoir attendu, constater un `403` avec `AccessDenied` et la mention d'expiration dans le XML, **puis remettre `'+5 minutes'`**.
 
-- [ ] **Step 13: Les quatre portes, puis commit**
+- [x] **Step 13: Les quatre portes, puis commit**
 
 ```bash
 make static-code-analysis && make check-cs && make deptrac && make test
@@ -2871,7 +2871,7 @@ La tâche de sécurité de la tranche : **le type déclaré par le client n'est 
 - Consumes: tâches 2, 3, 4.
 - Produces : `ImageInspectorInterface::inspect(string $localPath): ?InspectedImage` et `::thumbnail(string $localPath, string $targetPath): void`. `InspectedImage` : `readonly` avec `MediaMimeType $mimeType`, `int $width`, `int $height`, `int $byteSize`.
 
-- [ ] **Step 1: Fabriquer les fichiers d'exemple**
+- [x] **Step 1: Fabriquer les fichiers d'exemple**
 
 ```bash
 docker compose run --rm --no-deps backend php -r '
@@ -2885,7 +2885,7 @@ docker compose run --rm --no-deps backend php -r '
 
 Créer le dossier au préalable, et **versionner les quatre fichiers** : un test qui fabrique ses fixtures à l'exécution teste `gd` autant que le code.
 
-- [ ] **Step 2: Écrire le test de l'inspecteur**
+- [x] **Step 2: Écrire le test de l'inspecteur**
 
 `backend/tests/Unit/Media/Infrastructure/GdImageInspectorTest.php` :
 
@@ -2948,7 +2948,7 @@ final class GdImageInspectorTest extends TestCase
 }
 ```
 
-- [ ] **Step 3: Lancer, vérifier l'échec**
+- [x] **Step 3: Lancer, vérifier l'échec**
 
 ```bash
 make unit-test ARGS="--filter=GdImageInspectorTest"
@@ -2956,7 +2956,7 @@ make unit-test ARGS="--filter=GdImageInspectorTest"
 
 Expected : FAIL — classe introuvable.
 
-- [ ] **Step 4: Écrire le port et son DTO**
+- [x] **Step 4: Écrire le port et son DTO**
 
 `backend/src/Media/Application/ImageInspectorInterface.php` :
 
@@ -3010,7 +3010,7 @@ final readonly class InspectedImage
 }
 ```
 
-- [ ] **Step 5: Écrire l'inspecteur**
+- [x] **Step 5: Écrire l'inspecteur**
 
 `backend/src/Media/Infrastructure/Image/GdImageInspector.php` :
 
@@ -3086,7 +3086,7 @@ final readonly class GdImageInspector implements ImageInspectorInterface
 }
 ```
 
-- [ ] **Step 6: Relancer, vérifier PASS**
+- [x] **Step 6: Relancer, vérifier PASS**
 
 ```bash
 make unit-test ARGS="--filter=GdImageInspectorTest"
@@ -3094,7 +3094,7 @@ make unit-test ARGS="--filter=GdImageInspectorTest"
 
 Expected : PASS, 4 tests.
 
-- [ ] **Step 7: Écrire le handler du worker**
+- [x] **Step 7: Écrire le handler du worker**
 
 `backend/src/Media/Application/Command/ProcessMediaCommand.php` (compléter la classe vide de la tâche 4) :
 
@@ -3237,13 +3237,13 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
 
 Corriger l'import : ajouter `use App\Media\Domain\MediaMimeType;` en tête et remplacer `\App\Media\Domain\MediaMimeType::Jpeg` par `MediaMimeType::Jpeg`.
 
-- [ ] **Step 8: Câbler l'inspecteur**
+- [x] **Step 8: Câbler l'inspecteur**
 
 ```yaml
     App\Media\Application\ImageInspectorInterface: '@App\Media\Infrastructure\Image\GdImageInspector'
 ```
 
-- [ ] **Step 9: Écrire le test fonctionnel du traitement**
+- [x] **Step 9: Écrire le test fonctionnel du traitement**
 
 `backend/tests/Functional/Media/MediaProcessingTest.php` — il exerce le vrai MinIO et le vrai handler, en le déclenchant à la main (le transport est `in-memory` en test) :
 
@@ -3381,7 +3381,7 @@ final class MediaProcessingTest extends KernelTestCase
 
 L'identifiant dérivé de `crc32` garantit un ULID valide **et** distinct par fixture. Si le format rendu n'est pas un ULID valide (caractères hors base32 Crockford), fixer trois constantes littérales à la place — un ULID par fixture.
 
-- [ ] **Step 10: Lancer et vérifier**
+- [x] **Step 10: Lancer et vérifier**
 
 ```bash
 make functional-test ARGS="--filter=MediaProcessingTest"
@@ -3389,7 +3389,7 @@ make functional-test ARGS="--filter=MediaProcessingTest"
 
 Expected : PASS, 3 tests.
 
-- [ ] **Step 11: Vérifier le worker en vrai**
+- [x] **Step 11: Vérifier le worker en vrai**
 
 ```bash
 make up
@@ -3398,7 +3398,7 @@ docker compose logs -f worker
 
 Rejouer le flux `curl` de la tâche 4 (pré-signature, `PUT`, confirmation). Expected dans les logs : `Traitement du media … demande` puis `Media … pret`. La miniature apparaît dans la console MinIO à côté de l'original.
 
-- [ ] **Step 12: Les quatre portes, puis commit**
+- [x] **Step 12: Les quatre portes, puis commit**
 
 ```bash
 make static-code-analysis && make check-cs && make deptrac && make test
@@ -3434,7 +3434,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `Message::send(MessageId, ConversationId, UserId, ?MessageContent, list<MediaId>, ClientMessageId, \DateTimeImmutable)` — **signature modifiée**
   - `Message::mediaIds(): list<MediaId>`
 
-- [ ] **Step 1: Écrire les tests du domaine**
+- [x] **Step 1: Écrire les tests du domaine**
 
 Ajouter à `backend/tests/Unit/Message/Domain/MessageTest.php` :
 
@@ -3498,7 +3498,7 @@ Ajouter à `backend/tests/Unit/Message/Domain/MessageTest.php` :
 
 Ajouter `self::MEDIA_ID = '01JQZ0000000000000000000AB'` et les `use` correspondants.
 
-- [ ] **Step 2: Lancer, vérifier l'échec**
+- [x] **Step 2: Lancer, vérifier l'échec**
 
 ```bash
 make unit-test ARGS="--filter=MessageTest"
@@ -3506,7 +3506,7 @@ make unit-test ARGS="--filter=MessageTest"
 
 Expected : FAIL — `Message::send()` n'accepte pas ces arguments.
 
-- [ ] **Step 3: Modifier l'agrégat**
+- [x] **Step 3: Modifier l'agrégat**
 
 Dans `Message.php` : `content` devient `?MessageContent` déjà (T3), ajouter le champ `private array $mediaIds` (annoté `list<MediaId>`), modifier `send()` et `reconstitute()` pour le recevoir, ajouter `mediaIds()`, et dans `send()` :
 
@@ -3529,7 +3529,7 @@ Dans `deleteForEveryone()`, après `$this->content = null;` :
 
 `EmptyMessageException` implémente `InvalidInputExceptionInterface` (→ 422), message : `'Un message doit porter du texte ou au moins une image.'`.
 
-- [ ] **Step 4: Écrire le contrat de `Media` et le port de `Message`**
+- [x] **Step 4: Écrire le contrat de `Media` et le port de `Message`**
 
 `Media/Application/Contract/MediaOwnershipInterface.php` :
 
@@ -3587,7 +3587,7 @@ Puis : un id absent des lignes → `MediaNotFoundException` ; `owner_id` différ
 
 > `MediaAlreadyAttachedException` vit dans `Media/Domain/` : c'est `Media` qui possède la règle « un média ne s'attache qu'une fois ».
 
-- [ ] **Step 5: Écrire le test fonctionnel**
+- [x] **Step 5: Écrire le test fonctionnel**
 
 `backend/tests/Functional/Message/SendMessageWithMediaTest.php`, quatre cas :
 
@@ -3601,7 +3601,7 @@ Puis : un id absent des lignes → `MediaNotFoundException` ; `owner_id` différ
 
 Le dernier cas vérifie que le convertisseur snake_case s'applique aussi aux chemins indexés — c'est exactement l'exemple donné par `CLAUDE.md`.
 
-- [ ] **Step 6: Modifier commande, handler, repository, contrôleur, payload**
+- [x] **Step 6: Modifier commande, handler, repository, contrôleur, payload**
 
 - `SendMessageCommand` : `?MessageContent $content` et `list<MediaId> $mediaIds`.
 - `SendMessageCommandHandler` : appeler `$this->mediaOwnership->assertUsableBy($command->mediaIds, $command->senderId)` **avant** `Message::send()`, dans la transaction — même raison que le contrôle d'appartenance déjà présent : une vérification hors transaction serait devançable. Adapter le log `content_length` en `null === $content ? 0 : mb_strlen(...)`, et ajouter `'media_count' => count($command->mediaIds)`.
@@ -3648,14 +3648,14 @@ Le dernier cas vérifie que le convertisseur snake_case s'applique aussi aux che
         }
 ```
 
-- [ ] **Step 7: Câbler les deux alias**
+- [x] **Step 7: Câbler les deux alias**
 
 ```yaml
     App\Media\Application\Contract\MediaOwnershipInterface: '@App\Media\Infrastructure\Contract\DbalMediaOwnership'
     App\Message\Domain\Port\MediaOwnershipPortInterface: '@App\Message\Infrastructure\Contract\MediaOwnershipAdapter'
 ```
 
-- [ ] **Step 8: Lancer tous les tests de `Message`**
+- [x] **Step 8: Lancer tous les tests de `Message`**
 
 ```bash
 make functional-test ARGS="--filter='SendMessage|DeleteMessage|EditMessage'"
@@ -3664,7 +3664,7 @@ make unit-test ARGS="--filter=MessageTest"
 
 Expected : PASS. Les tests de T1 et T3 doivent passer **sans modification de leurs assertions** — seuls leurs appels à `Message::send()` gagnent les deux nouveaux arguments.
 
-- [ ] **Step 9: Les quatre portes, puis commit**
+- [x] **Step 9: Les quatre portes, puis commit**
 
 `make deptrac` est le contrôle qui compte : `Message` ne doit citer que `Media\Application\Contract\` — jamais `Media\Domain\` ni `Media\Infrastructure\`. Une violation ici signifie que l'adaptateur est mal placé.
 
@@ -3696,7 +3696,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces : `MediaFinderInterface::viewsFor(list<MediaId>): array<string, MediaView>` — indexé par ULID. `MediaView` : `readonly` avec `string $id`, `string $status`, `?string $mimeType`, `?int $width`, `?int $height`, `?string $url`, `?string $thumbnailUrl`, et `toArray(): array<string, scalar|null>`.
 
-- [ ] **Step 1: Écrire le test**
+- [x] **Step 1: Écrire le test**
 
 `backend/tests/Functional/Message/MessageMediaReadTest.php` :
 
@@ -3709,7 +3709,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 Le dernier cas est le seul qui protège contre un N+1 : sans lui, la solution évidente (une requête par message) passerait tous les autres tests.
 
-- [ ] **Step 2: Écrire le contrat**
+- [x] **Step 2: Écrire le contrat**
 
 `MediaView.php` — **forme figée, changement cassant** :
 
@@ -3745,11 +3745,11 @@ final readonly class MediaView
 }
 ```
 
-- [ ] **Step 3: Écrire `DbalMediaFinder`**
+- [x] **Step 3: Écrire `DbalMediaFinder`**
 
 Une requête `IN (:ids)` avec `ArrayParameterType::STRING`, puis signature des URLs via `MediaStorageInterface` **uniquement** pour les lignes `ready`. Signer une ligne `processing` ferait une URL vers un objet dont on ne sait pas encore s'il est servable.
 
-- [ ] **Step 4: Hydrater les lectures de messages**
+- [x] **Step 4: Hydrater les lectures de messages**
 
 Dans `DbalMessagePageReader::page()` : après avoir récupéré les lignes de messages, **une seule** requête sur `message_media` pour tous les ids de la page, puis **un seul** appel à `MediaFinderInterface::viewsFor()`.
 
@@ -3779,7 +3779,7 @@ Même traitement dans `DbalMessageReader` (un seul message : la requête reste i
 
 Ce qui **change le type de retour** de `toArray()` : il passe de `array<string, string|null>` à `array<string, mixed>`. Corriger l'annotation, PHPStan `max` la vérifie.
 
-- [ ] **Step 5: Vérifier, quatre portes, commit**
+- [x] **Step 5: Vérifier, quatre portes, commit**
 
 ```bash
 make functional-test ARGS="--filter='MessageMediaReadTest|MessagePagination'"
@@ -3813,7 +3813,7 @@ Trois sauts, aucun contexte ne pilote l'autre (spec §6.1).
 - Create (non prévu) : `backend/src/Shared/Application/Bus/DomainEventDispatcherInterface.php` + `backend/src/Shared/Infrastructure/Bus/DomainEventDispatcher.php`. Le Step 3 ci-dessous affirmait qu'un tel port existait déjà — **c'était faux** : les listeners existants réagissent avec une *commande* (`CommandDispatcherInterface`), aucun n'émet un second domain event. Le collecteur ne convenait pas : un listener tourne **après** le commit, donc hors de la boucle de `TransactionalMiddleware` qui vide le collecteur.
 - Modify (non prévu) : `backend/config/packages/messenger.yaml` — le transport `media` passe de `in-memory://` à `test://` en test. C'est le DSN de `zenstruck/messenger-test`, le seul qui offre `->process()`. Sans lui, un test ne peut asserter que ce qui **part** vers la file, jamais ce que le worker en fait — or toute la chorégraphie démarre côté consommation, dans `TransactionalMiddleware`.
 
-- [ ] **Step 1: Écrire le test**
+- [x] **Step 1: Écrire le test**
 
 `backend/tests/Functional/Media/MediaReadyPublicationTest.php`, contre l'espion `InMemoryEventPublisher` :
 
@@ -3827,11 +3827,11 @@ Trois sauts, aucun contexte ne pilote l'autre (spec §6.1).
 
 Les cas 1 et 2 sont le cœur : le second ne doit passer par **aucun `if`** dans le code — c'est la requête qui ne trouve rien.
 
-- [ ] **Step 2: L'événement partagé**
+- [x] **Step 2: L'événement partagé**
 
 `MessageMediaBecameReady` : `MessageId $messageId`, `ConversationId $conversationId`, `MediaId $mediaId`. Rien d'autre — le `MediaView` complet est resigné à la publication, une URL n'ayant pas sa place dans un événement.
 
-- [ ] **Step 3: Le listener de `Message`**
+- [x] **Step 3: Le listener de `Message`**
 
 ```php
 final readonly class PropagateMediaReadyListener implements DomainEventListenerInterface
@@ -3860,7 +3860,7 @@ final readonly class PropagateMediaReadyListener implements DomainEventListenerI
 
 ~~`EventDispatcherInterface` ici est le port de `Shared/Application/` déjà utilisé par les listeners existants~~ — **ce port n'existait pas.** Il a été créé pour l'occasion sous le nom `DomainEventDispatcherInterface` (voir la liste de fichiers ci-dessus), aligné sur `DomainEventListenerInterface` / `DomainEventCollectorInterface` et distinct de l'`EventDispatcherInterface` de Symfony. La consigne de fond tient : ne pas injecter `MessageBusInterface` dans `Application`.
 
-- [ ] **Step 4: Le listener de `Realtime`**
+- [x] **Step 4: Le listener de `Realtime`**
 
 Calqué sur `PublishMessageWasSentListener`. Il consulte `MediaFinderInterface` — le contrat publié de Media, nommé directement, `MediaFinderPortInterface` ayant été abandonné en tâche 7 — pour obtenir le `MediaView` frais et signé, puis :
 
@@ -3882,7 +3882,7 @@ Calqué sur `PublishMessageWasSentListener`. Il consulte `MediaFinderInterface` 
 
 > `Realtime` consomme `MediaContract` : ajouter `MediaContract` à sa ligne d'allowlist dans `deptrac-contexts.yaml`. C'est un élargissement délibéré, à mentionner dans le message de commit.
 
-- [ ] **Step 5: Vérifier de bout en bout, en vrai**
+- [x] **Step 5: Vérifier de bout en bout, en vrai**
 
 ```bash
 make up
@@ -3892,7 +3892,7 @@ Ouvrir deux navigateurs (Alice et Bob), envoyer une image depuis Alice, et **con
 
 > **Reporté après la tâche 10.** Cette vérification est infaisable ici : le front ne sait ni envoyer une image (tâche 9) ni afficher les trois états (tâche 10). Il n'existe donc aucun placeholder à regarder passer. À faire dès la tâche 10 terminée — la chaîne backend est couverte par `MediaReadyPublicationTest`, mais **rien ne prouve encore que le front consomme `message.media_ready`**.
 
-- [ ] **Step 6: Quatre portes, commit**
+- [x] **Step 6: Quatre portes, commit**
 
 ```bash
 git commit -m "feat(realtime): pousser la mise a jour d'un media traite
@@ -3930,7 +3930,7 @@ Nicolas est novice côté front : **commenter généreusement**, et expliquer le
 >
 > `isUploading` en plus : le compositeur bloque l'envoi tant qu'un transfert est en cours, plutôt que de laisser partir un message amputé d'une image.
 
-- [ ] **Step 1: Types et client**
+- [x] **Step 1: Types et client**
 
 Dans `types.ts`, ajouter `ApiMedia` et `media: ApiMedia[]` sur `ApiMessage`. Dans `client.ts` :
 
@@ -3945,7 +3945,7 @@ Dans `types.ts`, ajouter `ApiMedia` et `media: ApiMedia[]` sur `ApiMessage`. Dan
     request<void>(`/api/media/${mediaId}/uploaded`, { method: 'POST' }),
 ```
 
-- [ ] **Step 2: Le `PUT` brut, à part**
+- [x] **Step 2: Le `PUT` brut, à part**
 
 `frontend/src/api/upload.ts` :
 
@@ -3981,7 +3981,7 @@ export async function putBytes(uploadUrl: string, file: File): Promise<void> {
 }
 ```
 
-- [ ] **Step 3: Écrire le test du hook**
+- [x] **Step 3: Écrire le test du hook**
 
 `frontend/src/hooks/useMediaUpload.test.ts` — sur le cycle, avec `fetch` et `URL.createObjectURL` doublés :
 
@@ -3995,7 +3995,7 @@ export async function putBytes(uploadUrl: string, file: File): Promise<void> {
 
 Les deux derniers cas sont le vrai sujet de ce hook, pas un détail : voir l'étape suivante.
 
-- [ ] **Step 4: Écrire le hook**
+- [x] **Step 4: Écrire le hook**
 
 `frontend/src/hooks/useMediaUpload.ts`. Le commentaire d'en-tête doit expliquer la révocation :
 
@@ -4028,13 +4028,13 @@ Les deux derniers cas sont le vrai sujet de ce hook, pas un détail : voir l'ét
 
 Le corps : un `useState<PendingUpload[]>`, un `useRef` sur la liste courante pour que le `useEffect` de nettoyage lise l'état au démontage sans se relancer à chaque changement, et un `useEffect(() => () => { … revoke all … }, [])`.
 
-- [ ] **Step 5: Brancher le compositeur**
+- [x] **Step 5: Brancher le compositeur**
 
 `Composer.tsx` reste bête : un `<input type="file" accept="image/*" multiple>`, une rangée de vignettes avec une croix par vignette, et `onSend(content, mediaIds)`. Le composant ne connaît toujours ni le réseau ni le `client_message_id`.
 
 `useAppState.ts` : l'envoi optimiste porte désormais `media` — construit depuis les aperçus locaux, avec `status: 'processing'` — pour que le message apparaisse immédiatement avec ses images chez l'expéditeur.
 
-- [ ] **Step 6: Vérifier**
+- [x] **Step 6: Vérifier**
 
 ```bash
 make front-test
@@ -4049,7 +4049,7 @@ Puis, dans un vrai navigateur (`make up`, `http://localhost:8080`) : choisir une
 
 > Si Vite sert du code périmé après un `git checkout`, redémarrer le conteneur : `make restart SERVICE=frontend`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/
@@ -4075,7 +4075,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `frontend/src/ui/MessageList.tsx`
 - Test: `frontend/src/store/messagesReducer.test.ts`, `frontend/src/ui/MessageMedia.test.tsx`
 
-- [ ] **Step 1: Écrire les tests du reducer**
+- [x] **Step 1: Écrire les tests du reducer**
 
 Ajouter à `messagesReducer.test.ts` :
 
@@ -4088,7 +4088,7 @@ Ajouter à `messagesReducer.test.ts` :
 
 Le deuxième cas compte : l'événement SSE arrive pour toutes les conversations auxquelles on est abonné, y compris celles dont le fil n'est pas chargé.
 
-- [ ] **Step 2: Étendre le reducer**
+- [x] **Step 2: Étendre le reducer**
 
 ```ts
   | { type: 'media/ready'; conversationId: string; messageId: string; media: ApiMedia }
@@ -4096,11 +4096,11 @@ Le deuxième cas compte : l'événement SSE arrive pour toutes les conversations
 
 et la branche correspondante : trouver le message par `id` serveur, remplacer l'entrée de `media` dont l'`id` correspond, laisser le reste tel quel. Un `messageId` inconnu rend `state` — **la même référence**, pour que React ne re-rende pas.
 
-- [ ] **Step 3: Brancher l'événement SSE**
+- [x] **Step 3: Brancher l'événement SSE**
 
 Là où `message.created` / `message.edited` / `message.deleted` sont déjà traités, ajouter `message.media_ready` → `dispatch({ type: 'media/ready', … })`.
 
-- [ ] **Step 4: Écrire `MessageMedia.tsx`**
+- [x] **Step 4: Écrire `MessageMedia.tsx`**
 
 ```tsx
 /**
@@ -4119,7 +4119,7 @@ Là où `message.created` / `message.edited` / `message.deleted` sont déjà tra
 
 Trois branches : `rejected` → un bloc « Fichier refusé » ; `ready` → `<img src={media.thumbnail_url}>` dans un `<a href={media.url}>` ; tout le reste (`pending`, `processing`) → le placeholder.
 
-- [ ] **Step 5: Vérifier**
+- [x] **Step 5: Vérifier**
 
 ```bash
 make front-test && make front-typecheck
@@ -4135,7 +4135,7 @@ Puis les deux navigateurs : Alice envoie, Bob voit le placeholder puis l'image, 
 >
 > **Résolu depuis, hors périmètre de cette tâche** : `MessageWasSent` transporte désormais `mediaIds`, et `PublishMessageWasSentListener` fait porter `media` (les `MediaView` resignées) à la charge utile de `message.created`. Le critère est vérifié à deux navigateurs : Bob reçoit la bulle **avec son image**, sans rafraîchir. `message.media_ready` reste nécessaire pour les traitements lents, mais n'est plus le seul chemin.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat(front): afficher les trois etats d'un media
@@ -4158,7 +4158,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Create: `backend/src/Media/Infrastructure/Persistence/DbalOrphanMediaReader.php`, `backend/src/Media/Infrastructure/Console/PurgeOrphanMediaConsoleCommand.php`
 - Test: `backend/tests/Functional/Media/PurgeOrphanMediaTest.php`
 
-- [ ] **Step 1: Écrire le test**
+- [x] **Step 1: Écrire le test**
 
 | Cas | Attendu |
 |---|---|
@@ -4170,7 +4170,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 Le dernier cas est le plus important : il ferme la boucle ouverte par la tâche 6.
 
-- [ ] **Step 2: Le reader**
+- [x] **Step 2: Le reader**
 
 ```sql
 SELECT m.id, m.storage_key, m.thumbnail_key
@@ -4189,7 +4189,7 @@ LIMIT :limit
 >
 > À trancher avant l'extraction réelle de `Media` : la purge deviendrait alors une responsabilité de `Message`, qui sait ce qu'il porte. La classe porte ce raisonnement en docblock.
 
-- [ ] **Step 3: Le handler et la commande console**
+- [x] **Step 3: Le handler et la commande console**
 
 Pour chaque orphelin : `delete()` sur l'original et sur la miniature si elle existe, puis `DELETE FROM media_objects`. Dans cet ordre — si la suppression d'objet échoue, la ligne reste et la purge suivante réessaiera. L'inverse laisserait des octets sans référence, donc invisibles pour toujours.
 
@@ -4201,7 +4201,7 @@ docker compose run --rm backend bin/console media:purge-orphans
 
 Pas de planificateur : il n'y en a pas dans le projet, et en ajouter un pour une seule commande serait de l'infrastructure non justifiée (spec §7.3).
 
-- [ ] **Step 4: Quatre portes, commit**
+- [x] **Step 4: Quatre portes, commit**
 
 ```bash
 git commit -m "chore(medias): ramasser les medias orphelins
@@ -4221,7 +4221,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `CLAUDE.md`, `README.md`
 - Modify: `docs/superpowers/plans/2026-07-26-tranche-4-medias.md` (cocher les cases)
 
-- [ ] **Step 1: `CLAUDE.md`**
+- [x] **Step 1: `CLAUDE.md`**
 
 Trois endroits, et trois seulement :
 
@@ -4231,15 +4231,30 @@ Trois endroits, et trois seulement :
 
 **Ne pas** ajouter de section « médias » : `CLAUDE.md` documente les règles, pas les fonctionnalités.
 
-- [ ] **Step 2: `README.md`**
+- [x] **Step 2: `README.md`**
 
 La section d'installation gagne : le port `9001` (console MinIO), le port `15672` (console RabbitMQ), et la commande `media:purge-orphans`. Rien de plus.
 
-- [ ] **Step 3: Vérifier la tranche entière**
+- [x] **Step 3: Vérifier la tranche entière**
 
 Dérouler les **dix critères d'acceptation** de la spec, un par un, dans un vrai navigateur. Ils sont écrits pour être exécutables ; aucun ne doit être coché sans avoir été observé.
 
-- [ ] **Step 4: Commit final et pull request**
+**Relevé, au 2026-07-31.** Trois niveaux distincts, et ils ne se valent pas : *observé* veut dire vu tourner ; *couvert* veut dire qu'un test automatisé l'exerce, sans rejeu manuel ; *non vérifié* est écrit tel quel.
+
+| # | Critère | Statut |
+|---|---|---|
+| 1 | Octets directs vers MinIO, rien dans les logs | **Observé** — `PUT` navigateur vers `/messaging-media/…`, objets listés par `mc ls`, et 0 occurrence de `storage_key`, signature ou en-tête JFIF sur 300 lignes de logs backend |
+| 2 | Placeholder puis image chez Bob, sans rafraîchir | **Observé** à deux navigateurs. Nuance : depuis que `message.created` porte les médias, Bob voit le plus souvent l'image **d'emblée** — le worker est plus rapide que la frappe. Le placeholder reste le chemin des traitements lents, couvert par tests |
+| 3 | PHP renommé `.jpg` refusé, objet effacé | **Couvert** (`MediaProcessingTest`), non rejoué au navigateur |
+| 4 | 422 sans texte ni image, 201 sans texte avec image | **Couvert** (`SendMessageWithMediaTest`) |
+| 5 | 404 pour le média d'autrui, 409 en double attachement | **Couvert** (`SendMessageWithMediaTest`) |
+| 6 | Carol non membre n'obtient aucune URL signée | **Couvert** — l'appartenance cadre la query. **Expiration à 15 min : non vérifiée**, irréalisable en séance |
+| 7 | Rejeu de `uploaded` : 204, aucun second traitement | **Couvert** (`UploadFlowTest`) |
+| 8 | Supprimer pour tous rend les images inaccessibles | **Partiel, et c'est à savoir** — le détachement est immédiat (l'image sort des lectures), mais les octets restent jusqu'à la purge, soit **au moins 24 h**. Qui détient déjà une URL signée y accède encore jusqu'à 15 min. « Inaccessible » n'est donc vrai qu'au sens de l'application, pas du stockage |
+| 9 | `restart rabbitmq` sans perte de média | **Vérifié par configuration** — `messaging.media` et son exchange sont `durable: true` dans `infra/rabbitmq/definitions.json`. **Pas** par une interruption réelle en plein traitement |
+| 10 | Les portes de qualité sont vertes | **Observé** — PHPStan `max`, CS 0/295, deptrac 0 violation sur les deux dimensions, 92 unitaires + 153 fonctionnels backend, 101 tests front, typecheck propre |
+
+- [x] **Step 4: Commit final et pull request**
 
 ```bash
 make static-code-analysis && make check-cs && make deptrac && make test && make front-test && make front-typecheck
