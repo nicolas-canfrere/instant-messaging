@@ -25,6 +25,7 @@ final readonly class MediaView
         public ?int $height,
         public ?string $url,
         public ?string $thumbnailUrl,
+        public string $filename,
     ) {
     }
 
@@ -39,6 +40,7 @@ final readonly class MediaView
             'height' => $this->height,
             'url' => $this->url,
             'thumbnail_url' => $this->thumbnailUrl,
+            'filename' => $this->filename,
         ];
     }
 }

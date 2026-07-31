@@ -26,6 +26,7 @@ final class MediaObject
         private readonly MediaId $id,
         private readonly UserId $ownerId,
         private readonly StorageKey $storageKey,
+        private readonly OriginalFilename $originalFilename,
         private ?StorageKey $thumbnailKey,
         private MediaStatus $status,
         private readonly MediaMimeType $declaredMimeType,
@@ -44,6 +45,7 @@ final class MediaObject
         MediaId $id,
         UserId $ownerId,
         StorageKey $storageKey,
+        OriginalFilename $originalFilename,
         MediaMimeType $declaredMimeType,
         int $declaredSize,
         \DateTimeImmutable $now,
@@ -54,6 +56,7 @@ final class MediaObject
             $id,
             $ownerId,
             $storageKey,
+            $originalFilename,
             null,
             MediaStatus::Pending,
             $declaredMimeType,
@@ -73,6 +76,7 @@ final class MediaObject
         MediaId $id,
         UserId $ownerId,
         StorageKey $storageKey,
+        OriginalFilename $originalFilename,
         ?StorageKey $thumbnailKey,
         MediaStatus $status,
         MediaMimeType $declaredMimeType,
@@ -89,6 +93,7 @@ final class MediaObject
             $id,
             $ownerId,
             $storageKey,
+            $originalFilename,
             $thumbnailKey,
             $status,
             $declaredMimeType,
@@ -179,6 +184,11 @@ final class MediaObject
     public function storageKey(): StorageKey
     {
         return $this->storageKey;
+    }
+
+    public function originalFilename(): OriginalFilename
+    {
+        return $this->originalFilename;
     }
 
     public function thumbnailKey(): ?StorageKey

@@ -9,6 +9,7 @@ use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
 use App\Media\Domain\MediaRepositoryInterface;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\UserId;
@@ -159,6 +160,7 @@ final class MessageMediaReadTest extends DatabaseTestCase
             $mediaId,
             UserId::fromString($ownerId),
             StorageKey::forOriginal($mediaId, MediaMimeType::Jpeg),
+            OriginalFilename::fromString('photo.jpg'),
             MediaMimeType::Jpeg,
             2_000,
             $now,

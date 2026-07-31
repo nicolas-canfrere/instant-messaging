@@ -11,6 +11,7 @@ use App\Media\Domain\MediaNotFoundException;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRepositoryInterface;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Application\Bus\CommandDispatcherInterface;
 use App\Shared\Domain\Identifier\MediaId;
@@ -164,6 +165,7 @@ final class PurgeOrphanMediaTest extends DatabaseTestCase
             $mediaId,
             UserId::fromString($this->userId('alice')),
             $key,
+            OriginalFilename::fromString('photo.jpg'),
             MediaMimeType::Jpeg,
             2_000,
             $createdAt,

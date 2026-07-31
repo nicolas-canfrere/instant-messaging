@@ -9,6 +9,7 @@ use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Event\MediaWasProcessed;
 use App\Shared\Domain\Identifier\MediaId;
@@ -140,6 +141,7 @@ final class MediaObjectTest extends TestCase
             MediaId::fromString(self::MEDIA_ID),
             UserId::fromString(self::OWNER_ID),
             StorageKey::forOriginal(MediaId::fromString(self::MEDIA_ID), MediaMimeType::Jpeg),
+            OriginalFilename::fromString('photo.jpg'),
             StorageKey::forThumbnail(MediaId::fromString(self::MEDIA_ID)),
             MediaStatus::Ready,
             MediaMimeType::Jpeg,
@@ -166,6 +168,7 @@ final class MediaObjectTest extends TestCase
             $mediaId,
             UserId::fromString(self::OWNER_ID),
             StorageKey::forOriginal($mediaId, MediaMimeType::Jpeg),
+            OriginalFilename::fromString('photo.jpg'),
             MediaMimeType::Jpeg,
             2_000,
             $this->at('2026-07-26T09:59:00+00:00'),

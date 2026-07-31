@@ -12,6 +12,7 @@ use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
 use App\Media\Domain\MediaRepositoryInterface;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\UserId;
@@ -91,6 +92,7 @@ final class MediaProcessingTest extends KernelTestCase
             $mediaId,
             $this->anyUserId(),
             StorageKey::forOriginal($mediaId, MediaMimeType::Jpeg),
+            OriginalFilename::fromString('photo.jpg'),
             MediaMimeType::Jpeg,
             2_000,
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),
@@ -156,6 +158,7 @@ final class MediaProcessingTest extends KernelTestCase
             $mediaId,
             $this->anyUserId(),
             $key,
+            OriginalFilename::fromString('photo.jpg'),
             $declared,
             2_000,
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),

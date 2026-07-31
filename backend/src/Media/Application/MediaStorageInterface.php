@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Media\Application;
 
+use App\Media\Domain\MediaDisposition;
 use App\Media\Domain\MediaMimeType;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 
@@ -25,8 +27,18 @@ interface MediaStorageInterface
      */
     public function presignUpload(StorageKey $key, MediaMimeType $mimeType, \DateTimeImmutable $now): PresignedUpload;
 
-    /** @return non-empty-string URL signee pour un GET */
-    public function presignDownload(StorageKey $key, \DateTimeImmutable $now): string;
+    /**
+     * `$filename` est `null` pour une miniature : elle n'a pas de nom a porter,
+     * ce n'est pas un fichier que l'utilisateur a choisi.
+     *
+     * @return non-empty-string URL signee pour un GET
+     */
+    public function presignDownload(
+        StorageKey $key,
+        MediaDisposition $disposition,
+        ?OriginalFilename $filename,
+        \DateTimeImmutable $now,
+    ): string;
 
     /**
      * Rapatrie l'objet dans un fichier temporaire local et rend son chemin.

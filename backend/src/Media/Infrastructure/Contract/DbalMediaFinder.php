@@ -7,7 +7,9 @@ namespace App\Media\Infrastructure\Contract;
 use App\Media\Application\Contract\MediaFinderInterface;
 use App\Media\Application\Contract\MediaView;
 use App\Media\Application\MediaStorageInterface;
+use App\Media\Domain\MediaDisposition;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use Doctrine\DBAL\ArrayParameterType;
@@ -37,10 +39,10 @@ final readonly class DbalMediaFinder implements MediaFinderInterface
             return [];
         }
 
-        /** @var list<array{id: string, status: string, storage_key: string, thumbnail_key: string|null, mime_type: string|null, width: int|null, height: int|null}> $rows */
+        /** @var list<array{id: string, status: string, storage_key: string, thumbnail_key: string|null, mime_type: string|null, width: int|null, height: int|null, original_filename: string}> $rows */
         $rows = $this->connection->fetchAllAssociative(
             <<<'SQL'
-                SELECT id, status, storage_key, thumbnail_key, mime_type, width, height
+                SELECT id, status, storage_key, thumbnail_key, mime_type, width, height, original_filename
                 FROM media_objects
                 WHERE id IN (:ids)
                 SQL,
@@ -66,6 +68,7 @@ final readonly class DbalMediaFinder implements MediaFinderInterface
             // miniature sert donc de temoin unique de « servable » : c'est elle
             // qui porte la seule valeur dont l'absence casserait la signature.
             $thumbnailKey = MediaStatus::Ready === $status ? $row['thumbnail_key'] : null;
+            $filename = OriginalFilename::fromString($row['original_filename']);
 
             $views[$row['id']] = new MediaView(
                 $row['id'],
@@ -75,10 +78,13 @@ final readonly class DbalMediaFinder implements MediaFinderInterface
                 null === $thumbnailKey ? null : $row['height'],
                 null === $thumbnailKey
                     ? null
-                    : $this->storage->presignDownload(StorageKey::fromString($row['storage_key']), $now),
+                    // Inline AVEC nom : l'image s'affiche toujours dans <img>, mais
+                    // « Enregistrer sous… » propose enfin le vrai nom.
+                    : $this->storage->presignDownload(StorageKey::fromString($row['storage_key']), MediaDisposition::Inline, $filename, $now),
                 null === $thumbnailKey
                     ? null
-                    : $this->storage->presignDownload(StorageKey::fromString($thumbnailKey), $now),
+                    : $this->storage->presignDownload(StorageKey::fromString($thumbnailKey), MediaDisposition::Inline, null, $now),
+                $filename->toString(),
             );
         }
 

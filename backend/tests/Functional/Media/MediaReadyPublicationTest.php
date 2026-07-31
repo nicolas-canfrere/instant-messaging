@@ -8,6 +8,7 @@ use App\Media\Application\MediaStorageInterface;
 use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRepositoryInterface;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\UserId;
@@ -64,7 +65,7 @@ final class MediaReadyPublicationTest extends DatabaseTestCase
         // Exactement la forme de MediaView, rien de plus : aucune cle de
         // stockage ne doit fuir dans une charge utile poussee aux clients.
         self::assertSame(
-            ['id', 'status', 'mime_type', 'width', 'height', 'url', 'thumbnail_url'],
+            ['id', 'status', 'mime_type', 'width', 'height', 'url', 'thumbnail_url', 'filename'],
             array_keys($payload['media']),
         );
 
@@ -183,6 +184,7 @@ final class MediaReadyPublicationTest extends DatabaseTestCase
             $mediaId,
             UserId::fromString($this->userId('alice')),
             $key,
+            OriginalFilename::fromString($fixture),
             $declared,
             2_000,
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),

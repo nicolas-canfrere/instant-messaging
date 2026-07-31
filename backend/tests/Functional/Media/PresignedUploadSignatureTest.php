@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Media;
 
+use App\Media\Domain\MediaDisposition;
 use App\Media\Domain\MediaMimeType;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Media\Infrastructure\Storage\S3MediaStorage;
 use App\Shared\Domain\Identifier\MediaId;
@@ -61,11 +63,48 @@ final class PresignedUploadSignatureTest extends TestCase
 
         self::assertSame(200, $putResponse->getStatusCode());
 
-        $downloadUrl = $this->storage->presignDownload($key, new \DateTimeImmutable());
+        $downloadUrl = $this->storage->presignDownload($key, MediaDisposition::Inline, null, new \DateTimeImmutable());
         $getResponse = $http->get($downloadUrl);
 
         self::assertSame(200, $getResponse->getStatusCode());
         self::assertSame('contenu-de-test', (string) $getResponse->getBody());
+    }
+
+    /**
+     * Le nom d'origine doit atterrir dans l'en-tete Content-Disposition de
+     * l'URL signee — c'est la seule destination de OriginalFilename (Tache 1).
+     * Verifie a la fois la forme du parametre de signature ET le comportement
+     * reel du serveur : MinIO doit vraiment renvoyer l'en-tete demande.
+     */
+    public function testTheDownloadUrlCarriesTheOriginalFilename(): void
+    {
+        $key = StorageKey::forOriginal(MediaId::fromString('01JQZ0000000000000000000AC'), MediaMimeType::Jpeg);
+        $presigned = $this->storage->presignUpload($key, MediaMimeType::Jpeg, new \DateTimeImmutable());
+
+        $http = new HttpClient(['http_errors' => false]);
+        $http->put($presigned->url, [
+            'headers' => ['Content-Type' => 'image/jpeg'],
+            'body' => 'contenu-de-test',
+        ]);
+
+        $downloadUrl = $this->storage->presignDownload(
+            $key,
+            MediaDisposition::Inline,
+            OriginalFilename::fromString('rapport été.pdf'),
+            new \DateTimeImmutable(),
+        );
+
+        self::assertStringContainsString('response-content-disposition=', $downloadUrl);
+        self::assertStringContainsString('inline', urldecode($downloadUrl));
+        self::assertStringContainsString('filename%2A%3DUTF-8', $downloadUrl);
+
+        $getResponse = $http->get($downloadUrl);
+
+        self::assertSame(200, $getResponse->getStatusCode());
+        self::assertStringContainsString(
+            'inline; filename="rapport __t__.pdf"',
+            $getResponse->getHeaderLine('Content-Disposition'),
+        );
     }
 
     /**

@@ -14,6 +14,7 @@ use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
 use App\Media\Domain\MediaRepositoryInterface;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\UserId;
@@ -113,6 +114,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
             $mediaId,
             UserId::fromString(self::OWNER_ID),
             StorageKey::forOriginal($mediaId, MediaMimeType::Jpeg),
+            OriginalFilename::fromString('photo.jpg'),
             MediaMimeType::Jpeg,
             2_000,
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),
