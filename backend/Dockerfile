@@ -27,7 +27,13 @@ RUN apt-get update \
 #   pdo_pgsql : doctrine/dbal      intl : Symfony
 #   zip       : Composer           opcache : toujours
 #   redis     : présence éphémère (T2) — état à TTL, jamais en base
+#   amqp      : transport Messenger vers RabbitMQ (T4)
+#   gd        : mesure d'image et miniature, dans le worker (T4)
+#   fileinfo  : type MIME réel des octets reçus — le déclaré n'est jamais cru
 RUN install-php-extensions \
+        amqp \
+        fileinfo \
+        gd \
         intl \
         opcache \
         pdo_pgsql \

@@ -1,5 +1,23 @@
 # Substitutions valables uniquement en environnement de test.
+parameters:
+    # Seul environnement sans `minio-create-bucket` : c'est ce parametre qui
+    # fait naitre le bucket au premier acces (cf. `services.yaml`).
+    media.create_bucket_if_missing: true
+
 services:
+    # `InMemoryTransport::getSent()` ne convient PAS pour compter les
+    # dispatches a travers plusieurs requetes d'un meme test : le
+    # `ServicesResetter` de Symfony vide les services `kernel.reset` apres
+    # CHAQUE requete HTTP, y compris avec `disableReboot()` (qui empeche
+    # seulement la RECONSTRUCTION du conteneur). `MediaCommandSpy` ecoute un
+    # evenement dispatche AVANT tout transport, donc insensible a ce
+    # nettoyage — cf. UploadFlowTest::testConfirmingTheUploadIsIdempotent.
+    App\Tests\Support\MediaCommandSpy:
+        public: true
+        tags:
+            - { name: kernel.event_listener, event: Symfony\Component\Messenger\Event\SendMessageToTransportsEvent, method: onSendMessageToTransports }
+
+
     # Aucun hub Mercure n'est leve pendant les tests : l'espion permet
     # d'assertionner le topic ET la charge utile, ce qu'un hub reel ne
     # permettrait pas sans s'y abonner.
@@ -30,3 +48,29 @@ services:
 
     Psr\Clock\ClockInterface:
         alias: Symfony\Component\Clock\MockClock
+
+    # `public: true` pour que les tests puissent semer un media directement par
+    # l'agregat, sans passer par le flux d'upload complet.
+    #
+    # `autowire: true` explicite : contrairement a MockClock ci-dessus, ce
+    # constructeur a de vrais arguments (Connection, MediaMapper,
+    # DomainEventCollectorInterface) que ce fichier ne fournit pas — sans
+    # autowire ils resteraient a zero et l'instanciation echouerait.
+    App\Media\Infrastructure\Persistence\DbalMediaRepository:
+        public: true
+        autowire: true
+
+    App\Media\Domain\MediaRepositoryInterface:
+        alias: App\Media\Infrastructure\Persistence\DbalMediaRepository
+
+    # Compteur de requetes SQL. Seul moyen d'assertionner « UNE requete de
+    # medias pour toute la page, pas une par message » : sans lui, la solution
+    # naive (un aller-retour par message) passerait tous les autres tests.
+    App\Tests\Support\QueryRecorder\RecordedQueries:
+        public: true
+
+    App\Tests\Support\QueryRecorder\QueryRecorderMiddleware:
+        arguments:
+            $recorded: '@App\Tests\Support\QueryRecorder\RecordedQueries'
+        tags:
+            - { name: doctrine.middleware }

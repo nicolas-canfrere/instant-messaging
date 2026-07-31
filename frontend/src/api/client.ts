@@ -7,6 +7,7 @@ import type {
   Me,
   MessagePageResponse,
   RealtimeToken,
+  UploadTicket,
   UserSummary,
 } from './types';
 
@@ -54,11 +55,47 @@ export const api = {
     return request<MessagePageResponse>(`/api/conversations/${conversationId}/messages?${query}`);
   },
 
-  sendMessage: (conversationId: string, clientMessageId: string, content: string) =>
+  /**
+   * `content` peut etre `null` : un message n'est plus oblige d'avoir du texte,
+   * il peut n'etre QUE des images. Envoyer une chaine vide a la place ferait un
+   * 422 — le serveur rogne le contenu et refuse ce qui devient vide.
+   */
+  sendMessage: (
+    conversationId: string,
+    clientMessageId: string,
+    content: string | null,
+    mediaIds: string[] = [],
+  ) =>
     request<{ id: string }>(`/api/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ client_message_id: clientMessageId, content }),
+      body: JSON.stringify({
+        client_message_id: clientMessageId,
+        content,
+        media_ids: mediaIds,
+      }),
     }),
+
+  /**
+   * Reserve un emplacement et rend l'URL signee vers laquelle televerser. Le
+   * serveur ne voit jamais les octets : il ne fait que signer.
+   *
+   * `size` est ANNONCE, pas mesure : il permet de refuser un fichier hors
+   * plafond avant tout transfert. Le vrai controle de taille a lieu apres, cote
+   * worker — une URL pre-signee PUT ne sait pas plafonner ce qu'elle recoit.
+   */
+  presignUpload: (filename: string, contentType: string, size: number) =>
+    request<UploadTicket>('/api/media', {
+      method: 'POST',
+      body: JSON.stringify({ filename, content_type: contentType, size }),
+    }),
+
+  /**
+   * Dit au serveur que les octets sont arrives, ce qu'il ne peut pas savoir
+   * autrement : le PUT est alle directement au stockage, sans passer par lui.
+   * C'est cet appel qui met le worker en marche.
+   */
+  confirmUpload: (mediaId: string) =>
+    request<void>(`/api/media/${mediaId}/uploaded`, { method: 'POST' }),
 
   createDirect: (peerId: string) =>
     request<{ id: string }>('/api/conversations', {

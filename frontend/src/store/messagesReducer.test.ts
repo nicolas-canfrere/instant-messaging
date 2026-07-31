@@ -3,6 +3,7 @@ import {
   emptyMessagesState,
   messagesReducer,
   selectThread,
+  type StoredMedia,
   type StoredMessage,
 } from './messagesReducer';
 
@@ -19,6 +20,7 @@ function serverMessage(id: string, clientMessageId: string, content = 'texte'): 
     editedAt: null,
     deletedAt: null,
     status: 'sent',
+    media: [],
   };
 }
 
@@ -55,6 +57,7 @@ function aMessage(overrides: Partial<StoredMessage> = {}): StoredMessage {
     editedAt: null,
     deletedAt: null,
     status: 'sent',
+    media: [],
     ...overrides,
   };
 }
@@ -103,6 +106,7 @@ describe('messagesReducer', () => {
         editedAt: null,
         deletedAt: null,
         status: 'pending',
+        media: [],
       },
     });
 
@@ -136,6 +140,7 @@ describe('messagesReducer', () => {
         editedAt: null,
         deletedAt: null,
         status: 'pending',
+        media: [],
       },
     });
 
@@ -200,6 +205,7 @@ describe('messagesReducer', () => {
         editedAt: null,
         deletedAt: null,
         status: 'pending',
+        media: [],
       },
     });
 
@@ -229,6 +235,7 @@ describe('messagesReducer', () => {
         editedAt: null,
         deletedAt: null,
         status: 'pending',
+        media: [],
       },
     });
     state = messagesReducer(state, {
@@ -413,5 +420,270 @@ describe('message/edited', () => {
     expect(messagesReducer(messagesReducer(base, action), action)).toEqual(
       messagesReducer(base, action),
     );
+  });
+
+  describe('media/ready', () => {
+    const MESSAGE_ID = '01J0000000000000000000000A';
+    const MEDIA_ID = '01JQZ0000000000000000050AA';
+    const AUTRE_MEDIA_ID = '01JQZ0000000000000000051AA';
+
+    function processing(id: string): StoredMedia {
+      return {
+        id,
+        status: 'processing',
+        url: null,
+        thumbnailUrl: null,
+        width: null,
+        height: null,
+        previewUrl: `blob:local/${id}`,
+      };
+    }
+
+    function ready(id: string): StoredMedia {
+      return {
+        id,
+        status: 'ready',
+        url: `https://stockage.test/${id}?X-Amz-Signature=abc`,
+        thumbnailUrl: `https://stockage.test/${id}-thumb?X-Amz-Signature=abc`,
+        width: 1600,
+        height: 900,
+        previewUrl: null,
+      };
+    }
+
+    /** Un fil charge, avec un message portant DEUX images encore en traitement. */
+    function threadWithTwoMedia() {
+      return messagesReducer(emptyMessagesState(), {
+        type: 'message/received',
+        message: aMessage({
+          id: MESSAGE_ID,
+          media: [processing(MEDIA_ID), processing(AUTRE_MEDIA_ID)],
+        }),
+      });
+    }
+
+    it('remplace le media concerne et laisse les autres intacts', () => {
+      const before = threadWithTwoMedia();
+
+      const after = messagesReducer(before, {
+        type: 'media/ready',
+        conversationId: 'c1',
+        messageId: MESSAGE_ID,
+        media: ready(MEDIA_ID),
+      });
+
+      const media = selectThread(after, 'c1').items[0]?.media ?? [];
+
+      expect(media[0]).toEqual(ready(MEDIA_ID));
+      // Le second n'a pas bouge : un evenement porte UNE image, pas la liste.
+      expect(media[1]).toEqual(processing(AUTRE_MEDIA_ID));
+    });
+
+    /**
+     * Le cas qui compte : l'evenement arrive pour TOUTES les conversations
+     * auxquelles on est abonne, y compris celles dont le fil n'est pas charge.
+     * On verifie la REFERENCE, pas l'egalite — un nouvel objet ferait re-rendre
+     * toute la liste pour une image qui n'est affichee nulle part.
+     */
+    it('rend l etat inchange, a la reference pres, pour un fil non charge', () => {
+      const before = threadWithTwoMedia();
+
+      const after = messagesReducer(before, {
+        type: 'media/ready',
+        conversationId: 'conversation-jamais-ouverte',
+        messageId: MESSAGE_ID,
+        media: ready(MEDIA_ID),
+      });
+
+      expect(after).toBe(before);
+    });
+
+    it('rend l etat inchange pour un message absent du fil', () => {
+      const before = threadWithTwoMedia();
+
+      const after = messagesReducer(before, {
+        type: 'media/ready',
+        conversationId: 'c1',
+        messageId: '01J0000000000000000000000Z',
+        media: ready(MEDIA_ID),
+      });
+
+      expect(after).toBe(before);
+    });
+
+    it('est idempotent : un redelivrage donne le meme etat', () => {
+      const action = {
+        type: 'media/ready' as const,
+        conversationId: 'c1',
+        messageId: MESSAGE_ID,
+        media: ready(MEDIA_ID),
+      };
+
+      const once = messagesReducer(threadWithTwoMedia(), action);
+
+      expect(messagesReducer(once, action)).toEqual(once);
+    });
+
+    it('applique aussi un refus, qui est une issue comme une autre', () => {
+      const rejected: StoredMedia = {
+        id: MEDIA_ID,
+        status: 'rejected',
+        url: null,
+        thumbnailUrl: null,
+        width: null,
+        height: null,
+        previewUrl: null,
+      };
+
+      const after = messagesReducer(threadWithTwoMedia(), {
+        type: 'media/ready',
+        conversationId: 'c1',
+        messageId: MESSAGE_ID,
+        media: rejected,
+      });
+
+      expect(selectThread(after, 'c1').items[0]?.media[0]).toEqual(rejected);
+    });
+
+    /**
+     * Regression trouvee au navigateur, pas en test : chez un DESTINATAIRE, le
+     * message arrive sans aucun media — `message.created` n'en porte pas. Une
+     * implementation qui se contente de remplacer une entree existante ne
+     * trouve alors rien a remplacer, et l'image n'apparait jamais.
+     */
+    it('ajoute le media quand le message n en portait aucun, cas du destinataire', () => {
+      const before = messagesReducer(emptyMessagesState(), {
+        type: 'message/received',
+        message: aMessage({ id: MESSAGE_ID, content: null, media: [] }),
+      });
+
+      const after = messagesReducer(before, {
+        type: 'media/ready',
+        conversationId: 'c1',
+        messageId: MESSAGE_ID,
+        media: ready(MEDIA_ID),
+      });
+
+      expect(selectThread(after, 'c1').items[0]?.media).toEqual([ready(MEDIA_ID)]);
+    });
+  });
+
+  /**
+   * L'autre moitie de la meme regression, cote EXPEDITEUR : son echo SSE
+   * arrive avec `media: []` et ecrasait les apercus locaux au moment meme ou le
+   * serveur confirmait l'envoi. La bulle se vidait sous ses yeux.
+   */
+  describe('echo SSE d un message porteur de medias', () => {
+    it('conserve les apercus locaux quand l echo n en porte aucun', () => {
+      const preview: StoredMedia = {
+        id: '01JQZ0000000000000000070AA',
+        status: 'processing',
+        url: null,
+        thumbnailUrl: null,
+        width: null,
+        height: null,
+        previewUrl: 'blob:local/1',
+      };
+
+      const optimistic = messagesReducer(emptyMessagesState(), {
+        type: 'message/optimistic',
+        message: aMessage({ id: null, clientMessageId: 'c-envoi', content: null, media: [preview] }),
+      });
+
+      const after = messagesReducer(optimistic, {
+        type: 'message/received',
+        message: aMessage({
+          id: '01J0000000000000000000000B',
+          clientMessageId: 'c-envoi',
+          content: null,
+          media: [],
+        }),
+      });
+
+      const item = selectThread(after, 'c1').items[0];
+
+      expect(item?.status).toBe('sent');
+      expect(item?.media).toEqual([preview]);
+    });
+
+    /** Une page d'historique, elle, fait autorite : ses medias remplacent tout. */
+    it('laisse le serveur gagner quand il porte reellement des medias', () => {
+      const stale: StoredMedia = {
+        id: '01JQZ0000000000000000071AA',
+        status: 'processing',
+        url: null,
+        thumbnailUrl: null,
+        width: null,
+        height: null,
+        previewUrl: 'blob:local/2',
+      };
+
+      // Un `ready` porte TOUJOURS ses URLs : le CHECK `media_ready_is_measured`
+      // l'impose en base. C'est ce qui rend l'apercu local inutile.
+      const fresh: StoredMedia = {
+        ...stale,
+        status: 'ready',
+        url: 'https://stockage.test/original?X-Amz-Signature=abc',
+        thumbnailUrl: 'https://stockage.test/thumb?X-Amz-Signature=abc',
+        previewUrl: null,
+      };
+
+      const optimistic = messagesReducer(emptyMessagesState(), {
+        type: 'message/optimistic',
+        message: aMessage({ id: null, clientMessageId: 'c-envoi', content: null, media: [stale] }),
+      });
+
+      const after = messagesReducer(optimistic, {
+        type: 'page/loaded',
+        conversationId: 'c1',
+        items: [
+          aMessage({
+            id: '01J0000000000000000000000B',
+            clientMessageId: 'c-envoi',
+            content: null,
+            media: [fresh],
+          }),
+        ],
+        nextBefore: null,
+      });
+
+      expect(selectThread(after, 'c1').items[0]?.media).toEqual([fresh]);
+    });
+
+    /**
+     * Depuis que `message.created` porte les medias, l'echo arrive avec la vue
+     * SERVEUR — souvent encore `processing`, donc sans aucune URL. Recopier
+     * cette vue telle quelle remplacerait l'image de l'expediteur par un
+     * placeholder a l'instant meme ou le serveur accuse reception.
+     */
+    it('reporte l apercu local sur le media que l echo decrit', () => {
+      const preview: StoredMedia = {
+        id: '01JQZ0000000000000000072AA',
+        status: 'processing',
+        url: null,
+        thumbnailUrl: null,
+        width: null,
+        height: null,
+        previewUrl: 'blob:local/3',
+      };
+
+      const optimistic = messagesReducer(emptyMessagesState(), {
+        type: 'message/optimistic',
+        message: aMessage({ id: null, clientMessageId: 'c-envoi', content: null, media: [preview] }),
+      });
+
+      const after = messagesReducer(optimistic, {
+        type: 'message/received',
+        message: aMessage({
+          id: '01J0000000000000000000000B',
+          clientMessageId: 'c-envoi',
+          content: null,
+          // Ce que le serveur sait : le media existe, il est en traitement.
+          media: [{ ...preview, previewUrl: null }],
+        }),
+      });
+
+      expect(selectThread(after, 'c1').items[0]?.media[0]?.previewUrl).toBe('blob:local/3');
+    });
   });
 });

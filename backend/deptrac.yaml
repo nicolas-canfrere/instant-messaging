@@ -24,7 +24,7 @@ deptrac:
         - name: Vendor
           collectors:
               - type: classNameRegex
-                value: '#^(Symfony|Doctrine|Monolog|Lcobucci)\\.*#'
+                value: '#^(Aws|Symfony|Doctrine|Monolog|Lcobucci)\\.*#'
 
     ruleset:
         # LA regle du projet : le domaine ne depend de rien. Pas meme symfony/uid.

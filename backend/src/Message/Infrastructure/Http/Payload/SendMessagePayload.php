@@ -23,12 +23,31 @@ final readonly class SendMessagePayload
         // l'invariant du domaine, et il est le seul a faire foi. Cette
         // contrainte-ci est donc legerement plus stricte, ce qui est le bon
         // sens pour une garde de bordure.
-        #[Assert\NotBlank(message: 'Un message ne peut pas etre vide.')]
+        //
+        // `NotBlank` disparait : un message peut desormais n'etre QUE des
+        // images. C'est le controleur qui refuse un message sans texte NI
+        // media — une regle qui croise deux champs, donc pas une contrainte.
         #[Assert\Length(
             max: MessageContent::MAX_LENGTH,
             maxMessage: 'Un message ne peut pas depasser {{ limit }} caracteres.',
         )]
-        public string $content = '',
+        public ?string $content = null,
+
+        // PAS `list<string>` : un corps JSON `{"media_ids": {"a": "..."}}`
+        // deserialise en tableau a cles NON sequentielles. Le controleur
+        // rend la liste vraie avec `array_values()` ; une annotation `list`
+        // ici mentirait au meme titre que le `@var array{...}` que CLAUDE.md
+        // interdit sur une charge utile.
+        /** @var array<string> */
+        #[Assert\Count(max: 10, maxMessage: 'Un message ne peut pas porter plus de {{ limit }} images.')]
+        #[Assert\Unique(message: 'Un media ne peut pas etre attache deux fois au meme message.')]
+        #[Assert\All([
+            new Assert\Regex(
+                pattern: AbstractUlidIdentifier::PATTERN,
+                message: 'Cet identifiant n\'est pas un ULID valide.',
+            ),
+        ])]
+        public array $mediaIds = [],
     ) {
     }
 }

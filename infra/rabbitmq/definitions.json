@@ -1,0 +1,50 @@
+{
+    "rabbit_version": "4.2.4",
+    "rabbitmq_version": "4.2.4",
+    "users": [
+        {
+            "name": "app",
+            "password_hash": "cQHshcOmkXi+dNWq6N8x7oMiYGNs2OF6Ju6TfG46/60vy6zX",
+            "hashing_algorithm": "rabbit_password_hashing_sha256",
+            "tags": ["administrator"]
+        }
+    ],
+    "vhosts": [{ "name": "/" }],
+    "permissions": [
+        { "user": "app", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }
+    ],
+    "parameters": [],
+    "global_parameters": [],
+    "policies": [],
+    "queues": [
+        {
+            "name": "messaging.media",
+            "vhost": "/",
+            "durable": true,
+            "auto_delete": false,
+            "type": "classic",
+            "arguments": {}
+        }
+    ],
+    "exchanges": [
+        {
+            "name": "messaging.media.exchange",
+            "vhost": "/",
+            "type": "direct",
+            "durable": true,
+            "auto_delete": false,
+            "internal": false,
+            "arguments": {}
+        }
+    ],
+    "bindings": [
+        {
+            "source": "messaging.media.exchange",
+            "vhost": "/",
+            "destination": "messaging.media",
+            "destination_type": "queue",
+            "routing_key": "",
+            "arguments": {}
+        }
+    ]
+}

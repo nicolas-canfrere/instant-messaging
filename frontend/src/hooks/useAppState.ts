@@ -3,13 +3,14 @@ import { ulid } from 'ulid';
 import { api } from '../api/client';
 import { ProblemError } from '../api/problem';
 import { retryWithBackoff } from '../api/retry';
-import type { ApiMessage, ConversationSummary, Me, UserSummary } from '../api/types';
+import type { ApiMedia, ApiMessage, ConversationSummary, Me, UserSummary } from '../api/types';
 import { RealtimeClient, type EventSourceLike } from '../realtime/RealtimeClient';
 import {
   emptyMessagesState,
   messagesReducer,
   selectThread,
   type MessagesState,
+  type StoredMedia,
   type StoredMessage,
 } from '../store/messagesReducer';
 import { emptyPresenceState, presenceReducer } from '../store/presenceReducer';
@@ -21,6 +22,7 @@ import {
 import { useReadWatermark } from './useReadWatermark';
 import { emptyTypingState, typingReducer, type TypingState } from '../store/typingReducer';
 import { useHeartbeat } from './useHeartbeat';
+import type { TakenMedia } from './useMediaUpload';
 import { useTyping } from './useTyping';
 
 /**
@@ -40,6 +42,24 @@ function fromApiMessage(message: ApiMessage): StoredMessage {
     editedAt: message.edited_at,
     deletedAt: message.deleted_at,
     status: 'sent',
+    media: message.media.map(fromApiMedia),
+  };
+}
+
+/**
+ * `previewUrl: null` : un message venu du serveur n'a jamais d'apercu local.
+ * Meme chez l'expediteur — s'il recharge la page, ses `blob:` URL sont mortes
+ * avec l'onglet precedent, et c'est bien le serveur qui sert les images.
+ */
+function fromApiMedia(media: ApiMedia): StoredMedia {
+  return {
+    id: media.id,
+    status: media.status,
+    url: media.url,
+    thumbnailUrl: media.thumbnail_url,
+    width: media.width,
+    height: media.height,
+    previewUrl: null,
   };
 }
 
@@ -56,6 +76,7 @@ const NAMED_EVENTS = [
   'receipt.updated',
   'message.deleted',
   'message.edited',
+  'message.media_ready',
 ];
 
 /**
@@ -134,7 +155,81 @@ function toStoredMessage(payload: Record<string, unknown>): StoredMessage {
     editedAt: readNullableString(payload, 'edited_at'),
     deletedAt: readNullableString(payload, 'deleted_at'),
     status: 'sent',
+    // Les medias arrivent des la creation du message : le destinataire voit
+    // donc tout de suite les emplacements — souvent meme les images, le worker
+    // etant plus rapide que la frappe. `message.media_ready`, traite plus bas,
+    // ne sert plus qu'aux traitements lents.
+    media: toStoredMediaList(payload),
   };
+}
+
+/**
+ * Charge utile de `message.media_ready` :
+ * `{ message_id, conversation_id, media: { id, status, mime_type, width, height, url, thumbnail_url } }`
+ * (voir `PublishMessageMediaBecameReadyListener.php`).
+ *
+ * `previewUrl: null` : cet objet vient du serveur, qui n'a jamais eu l'apercu
+ * local de l'expediteur. C'est justement le moment ou l'on cesse d'en avoir
+ * besoin — le serveur a desormais une vraie miniature.
+ */
+function toStoredMedia(payload: Record<string, unknown>): StoredMedia | null {
+  const media = payload['media'];
+
+  if (typeof media !== 'object' || media === null) {
+    return null;
+  }
+
+  return readMedia(media as Record<string, unknown>);
+}
+
+/**
+ * La liste `media` de `message.created`. Un destinataire la recoit des la
+ * creation du message : sans elle, il ignorerait jusqu'a l'EXISTENCE des
+ * images et devrait redemander la page a l'aveugle pour le decouvrir.
+ *
+ * Les entrees illisibles sont ecartees, pas remplacees par un objet vide : une
+ * bulle sans emplacement vaut mieux qu'un emplacement qui n'affichera jamais rien.
+ */
+function toStoredMediaList(payload: Record<string, unknown>): StoredMedia[] {
+  const media = payload['media'];
+
+  if (!Array.isArray(media)) {
+    return [];
+  }
+
+  return media
+    .map((item: unknown) =>
+      typeof item === 'object' && item !== null ? readMedia(item as Record<string, unknown>) : null,
+    )
+    .filter((item): item is StoredMedia => item !== null);
+}
+
+function readMedia(fields: Record<string, unknown>): StoredMedia | null {
+  const id = readString(fields, 'id');
+  const status = readString(fields, 'status');
+
+  // Un statut hors des quatre connus signalerait un backend et un front
+  // desaccordes : on ignore plutot que d'afficher un etat qu'on ne sait pas rendre.
+  if (id === '' || !['pending', 'processing', 'ready', 'rejected'].includes(status)) {
+    return null;
+  }
+
+  return {
+    id,
+    status: status as StoredMedia['status'],
+    url: readNullableString(fields, 'url'),
+    thumbnailUrl: readNullableString(fields, 'thumbnail_url'),
+    width: readNullableNumber(fields, 'width'),
+    height: readNullableNumber(fields, 'height'),
+    previewUrl: null,
+  };
+}
+
+/** Comme `readNullableString`, pour les dimensions. */
+function readNullableNumber(payload: Record<string, unknown>, key: string): number | null {
+  const value = payload[key];
+
+  return typeof value === 'number' ? value : null;
 }
 
 /**
@@ -185,8 +280,14 @@ export type AppState = {
   notifyTyping: (conversationId: string) => void;
   selectConversation: (conversationId: string) => void;
   loadOlder: () => void;
+  /**
+   * Recharge la page courante de messages pour obtenir des URL de medias
+   * fraichement signees. Appele quand une miniature refuse de se charger : une
+   * URL pre-signee vit quinze minutes, un onglet reste ouvert plus longtemps.
+   */
+  refreshMediaUrls: () => void;
   refreshConversations: () => Promise<void>;
-  send: (conversationId: string, content: string) => Promise<void>;
+  send: (conversationId: string, content: string, media?: TakenMedia[]) => Promise<void>;
   deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
   editMessage: (conversationId: string, messageId: string, content: string) => Promise<void>;
   createDirect: (peerId: string) => Promise<void>;
@@ -284,12 +385,29 @@ export function useAppState(me: Me): AppState {
     void loadPage(conversationId, thread.nextBefore);
   }, [loadPage]);
 
+  const refreshMediaUrls = useCallback(() => {
+    const conversationId = selectedIdRef.current;
+
+    if (conversationId === null) return;
+
+    // Sans curseur : on redemande la page la plus recente. `page/loaded` fait
+    // un upsert, donc les messages deja presents sont mis a jour sur place,
+    // avec leurs medias resignes — rien n'est duplique ni perdu.
+    void loadPage(conversationId);
+  }, [loadPage]);
+
   const send = useCallback(
-    async (conversationId: string, content: string): Promise<void> => {
+    async (conversationId: string, content: string, media: TakenMedia[] = []): Promise<void> => {
       // L'identifiant est genere AVANT le premier envoi et reutilise a l'identique
       // a chaque tentative : c'est la cle d'idempotence. Le regenerer entre deux
       // essais creerait un second message a chaque reessai reussi.
       const clientMessageId = ulid();
+
+      // Une chaine vide n'est pas un contenu : un message peut desormais n'etre
+      // QUE des images. Le serveur rogne puis refuse ce qui devient vide, il
+      // faut donc lui dire `null`, pas `''`.
+      const trimmed = content.trim();
+      const payloadContent = trimmed === '' ? null : trimmed;
 
       dispatch({
         type: 'message/optimistic',
@@ -298,17 +416,41 @@ export function useAppState(me: Me): AppState {
           clientMessageId,
           conversationId,
           senderId: me.id,
-          content,
+          content: payloadContent,
           createdAt: new Date().toISOString(),
           editedAt: null,
           deletedAt: null,
           status: 'pending',
+          // `processing` et non `pending` : les octets SONT partis, c'est meme
+          // la condition pour qu'on en soit ici. Ce qui reste a faire, c'est
+          // l'inspection par le worker.
+          //
+          // L'apercu local est la seule image affichable a cet instant, le
+          // serveur n'ayant pas encore de miniature. Sa duree de vie appartient
+          // desormais au store, plus a `useMediaUpload` (cf. son en-tete).
+          media: media.map(
+            (item): StoredMedia => ({
+              id: item.mediaId,
+              status: 'processing',
+              url: null,
+              thumbnailUrl: null,
+              width: null,
+              height: null,
+              previewUrl: item.previewUrl,
+            }),
+          ),
         },
       });
 
       try {
         const { id } = await retryWithBackoff(
-          () => api.sendMessage(conversationId, clientMessageId, content),
+          () =>
+            api.sendMessage(
+              conversationId,
+              clientMessageId,
+              payloadContent,
+              media.map((item) => item.mediaId),
+            ),
           { attempts: 3 },
         );
 
@@ -623,6 +765,35 @@ export function useAppState(me: Me): AppState {
           return;
         }
 
+        if (event.type === 'message.media_ready') {
+          const media = toStoredMedia(event.payload);
+
+          if (media === null) {
+            return;
+          }
+
+          const conversationId = readString(event.payload, 'conversation_id');
+          const messageId = readString(event.payload, 'message_id');
+
+          // L'apercu local de l'expediteur a fini son service : le serveur a
+          // desormais une miniature. On rend sa memoire AVANT de remplacer
+          // l'entree, seul instant ou l'on tient encore la `blob:` URL.
+          //
+          // Chez les autres membres du fil, il n'y a rien a revoquer : ils
+          // n'ont jamais eu les octets. C'est le meme code pour les deux.
+          const previous = selectThread(messagesStateRef.current, conversationId)
+            .items.find((item) => item.id === messageId)
+            ?.media.find((item) => item.id === media.id);
+
+          if (previous?.previewUrl != null) {
+            URL.revokeObjectURL(previous.previewUrl);
+          }
+
+          dispatch({ type: 'media/ready', conversationId, messageId, media });
+
+          return;
+        }
+
         if (event.type === 'receipt.updated') {
           dispatchReceipts({
             type: 'receipt/updated',
@@ -714,6 +885,7 @@ export function useAppState(me: Me): AppState {
     notifyTyping,
     selectConversation,
     loadOlder,
+    refreshMediaUrls,
     refreshConversations,
     send,
     deleteMessage,

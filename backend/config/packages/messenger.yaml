@@ -23,5 +23,54 @@ framework:
                 middleware:
                     - App\Shared\Infrastructure\Bus\LoggingMiddleware
 
+        failure_transport: failed
+
         transports:
             sync: 'sync://'
+
+            # `auto_setup: false` : la file et l'exchange sont declares dans
+            # infra/rabbitmq/definitions.json, charges au boot du hub. La
+            # topologie est versionnee, pas improvisee au premier message.
+            media:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+                options:
+                    auto_setup: false
+                    exchange:
+                        name: 'messaging.media.exchange'
+                    queues:
+                        messaging.media: ~
+
+            # Un echec definitif ne doit pas disparaitre : il atterrit en base,
+            # ou `messenger:failed:show` le retrouve.
+            #
+            # `auto_setup: false` : meme discipline que `media` ci-dessus. La
+            # table est creee par une migration explicite, pas par le premier
+            # message qui echoue — sinon elle n'existerait que sur les bases
+            # qui ont deja vu un echec, jamais sur une base neuve.
+            failed:
+                dsn: 'doctrine://default?table_name=messenger_failed'
+                options:
+                    auto_setup: false
+
+        routing:
+            App\Media\Application\Command\ProcessMediaCommand: media
+
+when@test:
+    framework:
+        messenger:
+            transports:
+                # Aucun RabbitMQ n'est necessaire en CI. `test://` plutot que
+                # `in-memory://` : c'est le DSN de zenstruck/messenger-test, le
+                # seul qui offre `->process()`. Sans lui, un test peut asserter
+                # ce qui PART vers la file, jamais ce que le worker en fait —
+                # or toute la choregraphie de `MediaWasProcessed` demarre dans
+                # `TransactionalMiddleware`, cote consommation.
+                #
+                # Il n'y consomme rien tout seul : `test://` intercepte par
+                # defaut, exactement comme `in-memory://`.
+                media: 'test://'
+                failed: 'in-memory://'

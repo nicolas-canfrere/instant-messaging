@@ -5,13 +5,16 @@ declare(strict_types=1);
 namespace App\Message\Infrastructure\Persistence;
 
 use App\Message\Domain\ClientMessageId;
+use App\Message\Domain\MediaAlreadyAttachedException;
 use App\Message\Domain\Message;
 use App\Message\Domain\MessageNotFoundException;
 use App\Message\Domain\MessageRepositoryInterface;
 use App\Shared\Application\Event\DomainEventCollectorInterface;
 use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Domain\Identifier\UserId;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 
 final readonly class DbalMessageRepository implements MessageRepositoryInterface
@@ -25,14 +28,6 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
 
     public function insertIfAbsent(Message $message): ?Message
     {
-        // insertIfAbsent() n'insere jamais que le resultat de Message::send() :
-        // un tombstone n'est jamais insere, il resulte d'une edition ulterieure
-        // d'une ligne existante. Le contenu est donc toujours present ici.
-        $content = $message->content();
-        if (null === $content) {
-            throw new \LogicException('Un message fraichement envoye a toujours un contenu.');
-        }
-
         // Zero ligne rendue = la cle (sender_id, client_message_id) existe deja.
         // Le rejeu passe par du controle de flux ordinaire, pas par une
         // exception d'unicite rattrapee.
@@ -47,7 +42,7 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
                 'id' => $message->id()->toString(),
                 'conversation_id' => $message->conversationId()->toString(),
                 'sender_id' => $message->senderId()->toString(),
-                'content' => $content->toString(),
+                'content' => $message->content()?->toString(),
                 'client_message_id' => $message->clientMessageId()->toString(),
                 'created_at' => $message->createdAt()->format(\DateTimeInterface::ATOM),
             ],
@@ -57,11 +52,57 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
             return $this->ofClientKey($message->senderId(), $message->clientMessageId());
         }
 
+        foreach ($message->mediaIds() as $position => $mediaId) {
+            $this->connection->executeStatement(
+                <<<'SQL'
+                    INSERT INTO message_media (message_id, media_id, position)
+                    VALUES (:message_id, :media_id, :position)
+                    SQL,
+                [
+                    'message_id' => $message->id()->toString(),
+                    'media_id' => $mediaId->toString(),
+                    'position' => $position,
+                ],
+            );
+        }
+
         // Message n'ecrit PAS dans conversations : le pointeur est mis a jour
         // par Conversation, qui ecoute MessageWasSent.
         $this->collector->collect(...$message->releaseEvents());
 
         return null;
+    }
+
+    public function assertNoneAttached(array $mediaIds): void
+    {
+        if ([] === $mediaIds) {
+            return;
+        }
+
+        /** @var list<string> $attached */
+        $attached = $this->connection->fetchFirstColumn(
+            <<<'SQL'
+                SELECT media_id FROM message_media WHERE media_id IN (:media_ids)
+                SQL,
+            ['media_ids' => array_map(static fn(MediaId $id): string => $id->toString(), $mediaIds)],
+            ['media_ids' => ArrayParameterType::STRING],
+        );
+
+        if ([] === $attached) {
+            return;
+        }
+
+        $attachedIds = array_flip($attached);
+
+        // Parcourt $mediaIds, dans l'ORDRE DE LA REQUETE, plutot que $attached
+        // dans l'ordre que Postgres choisit de rendre : sans cela, le 409
+        // nommerait un media arbitraire du point de vue du client au lieu du
+        // premier fautif de sa propre liste.
+        foreach ($mediaIds as $mediaId) {
+            if (isset($attachedIds[$mediaId->toString()])) {
+                throw MediaAlreadyAttachedException::withId($mediaId);
+            }
+        }
     }
 
     public function ofId(ConversationId $conversationId, MessageId $messageId): Message
@@ -87,7 +128,7 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
             throw MessageNotFoundException::inConversation($conversationId, $messageId);
         }
 
-        return $this->mapper->fromRow($row);
+        return $this->mapper->fromRow($row, $this->mediaIdsOf($messageId));
     }
 
     public function save(Message $message): void
@@ -110,6 +151,20 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
                 'id' => $message->id()->toString(),
             ],
         );
+
+        // Ce test dit « la liste est vide », pas « detache » : il se declenche
+        // aussi bien pour un message texte-seul (jamais de liaison, DELETE
+        // sans effet) que pour une suppression pour tous (liaisons reelles,
+        // DELETE effectif). Il ne sait pas exprimer « le media a change » —
+        // hors perimetre ici, aucune route n'edite les medias d'un message.
+        if ([] === $message->mediaIds()) {
+            $this->connection->executeStatement(
+                <<<'SQL'
+                    DELETE FROM message_media WHERE message_id = :message_id
+                    SQL,
+                ['message_id' => $message->id()->toString()],
+            );
+        }
 
         $this->collector->collect(...$message->releaseEvents());
     }
@@ -137,6 +192,27 @@ final readonly class DbalMessageRepository implements MessageRepositoryInterface
             throw MessageNotFoundException::forClientKey($clientMessageId);
         }
 
-        return $this->mapper->fromRow($row);
+        return $this->mapper->fromRow($row, $this->mediaIdsOf(MessageId::fromString($row['id'])));
+    }
+
+    /**
+     * Frontiere de lecture pour reconstituer un agregat fidele : sans elle,
+     * `save()` verrait toujours une liste vide et supprimerait a tort les
+     * liaisons d'un message qui porte reellement des medias, au premier
+     * `edit()` venu.
+     *
+     * @return list<string>
+     */
+    private function mediaIdsOf(MessageId $messageId): array
+    {
+        /** @var list<string> $mediaIds */
+        $mediaIds = $this->connection->fetchFirstColumn(
+            <<<'SQL'
+                SELECT media_id FROM message_media WHERE message_id = :message_id ORDER BY position
+                SQL,
+            ['message_id' => $messageId->toString()],
+        );
+
+        return $mediaIds;
     }
 }

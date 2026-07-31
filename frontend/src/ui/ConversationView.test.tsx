@@ -34,6 +34,7 @@ function threadWith(conversationId: string, content: string): Thread {
         editedAt: null,
         deletedAt: null,
         status: 'sent',
+        media: [],
       },
     ],
     nextBefore: null,
@@ -70,6 +71,7 @@ describe('ConversationView', () => {
       onSend: vi.fn(async () => {}),
       onDeleteMessage: vi.fn(),
       onEditMessage: vi.fn(),
+      onMediaExpired: vi.fn(),
       onTyping: vi.fn(),
       onLeave: vi.fn(async () => {}),
     };

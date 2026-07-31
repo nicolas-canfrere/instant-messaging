@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Message\Domain;
 
 use App\Message\Domain\ClientMessageId;
 use App\Message\Domain\EditWindowExpiredException;
+use App\Message\Domain\EmptyMessageException;
 use App\Message\Domain\Message;
 use App\Message\Domain\MessageAlreadyDeletedException;
 use App\Message\Domain\MessageContent;
@@ -13,6 +14,7 @@ use App\Message\Domain\NotTheAuthorException;
 use App\Shared\Domain\Event\MessageWasDeleted;
 use App\Shared\Domain\Event\MessageWasEdited;
 use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Domain\Identifier\UserId;
 use PHPUnit\Framework\TestCase;
@@ -24,6 +26,7 @@ final class MessageLifecycleTest extends TestCase
     private const string AUTHOR_ID = '01J9ZQ7X8K3M4N5P6Q7R8S9TA3';
     private const string CLIENT_ID = '01J9ZQ7X8K3M4N5P6Q7R8S9TA5';
     private const string OTHER_USER_ID = '01J9ZQ7X8K3M4N5P6Q7R8S9TA4';
+    private const string MEDIA_ID = '01JQZ0000000000000000000AB';
 
     public function testAFreshMessageIsNeitherEditedNorDeleted(): void
     {
@@ -45,6 +48,7 @@ final class MessageLifecycleTest extends TestCase
             ConversationId::fromString(self::CONVERSATION_ID),
             UserId::fromString(self::AUTHOR_ID),
             null,
+            [],
             ClientMessageId::fromString(self::CLIENT_ID),
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),
             null,
@@ -218,6 +222,62 @@ final class MessageLifecycleTest extends TestCase
         self::assertNull($message->editedAt());
     }
 
+    public function testAMessageMayCarryImagesInsteadOfText(): void
+    {
+        $message = Message::send(
+            MessageId::fromString(self::MESSAGE_ID),
+            ConversationId::fromString(self::CONVERSATION_ID),
+            UserId::fromString(self::AUTHOR_ID),
+            null,
+            [MediaId::fromString(self::MEDIA_ID)],
+            ClientMessageId::fromString(self::CLIENT_ID),
+            new \DateTimeImmutable('2026-07-26T10:00:00+00:00'),
+        );
+
+        self::assertNull($message->content());
+        self::assertCount(1, $message->mediaIds());
+    }
+
+    public function testAMessageWithNeitherTextNorMediaIsRefused(): void
+    {
+        // L'invariant croise deux tables : il ne peut pas etre un CHECK
+        // (spec §2.3). Il vit donc ICI, et nulle part ailleurs.
+        $this->expectException(EmptyMessageException::class);
+
+        Message::send(
+            MessageId::fromString(self::MESSAGE_ID),
+            ConversationId::fromString(self::CONVERSATION_ID),
+            UserId::fromString(self::AUTHOR_ID),
+            null,
+            [],
+            ClientMessageId::fromString(self::CLIENT_ID),
+            new \DateTimeImmutable('2026-07-26T10:00:00+00:00'),
+        );
+    }
+
+    public function testDeletingForEveryoneDetachesTheMedia(): void
+    {
+        $message = Message::send(
+            MessageId::fromString(self::MESSAGE_ID),
+            ConversationId::fromString(self::CONVERSATION_ID),
+            UserId::fromString(self::AUTHOR_ID),
+            null,
+            [MediaId::fromString(self::MEDIA_ID)],
+            ClientMessageId::fromString(self::CLIENT_ID),
+            new \DateTimeImmutable('2026-07-26T10:00:00+00:00'),
+        );
+
+        $message->deleteForEveryone(
+            UserId::fromString(self::AUTHOR_ID),
+            new \DateTimeImmutable('2026-07-26T10:05:00+00:00'),
+        );
+
+        // Sans ce detachement, supprimer un message laisserait ses images
+        // integralement accessibles : le pire des deux mondes, une suppression
+        // qui a l'air d'avoir eu lieu (spec §7.2).
+        self::assertSame([], $message->mediaIds());
+    }
+
     private static function send(): Message
     {
         return Message::send(
@@ -225,6 +285,7 @@ final class MessageLifecycleTest extends TestCase
             ConversationId::fromString(self::CONVERSATION_ID),
             UserId::fromString(self::AUTHOR_ID),
             MessageContent::fromString('bonjour'),
+            [],
             ClientMessageId::fromString(self::CLIENT_ID),
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),
         );

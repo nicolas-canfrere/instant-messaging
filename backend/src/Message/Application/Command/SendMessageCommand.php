@@ -8,6 +8,7 @@ use App\Message\Domain\ClientMessageId;
 use App\Message\Domain\MessageContent;
 use App\Shared\Application\Bus\CommandInterface;
 use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Domain\Identifier\UserId;
 
@@ -18,11 +19,13 @@ use App\Shared\Domain\Identifier\UserId;
  */
 final readonly class SendMessageCommand implements CommandInterface
 {
+    /** @param list<MediaId> $mediaIds */
     public function __construct(
         public MessageId $messageId,
         public ConversationId $conversationId,
         public UserId $senderId,
-        public MessageContent $content,
+        public ?MessageContent $content,
+        public array $mediaIds,
         public ClientMessageId $clientMessageId,
     ) {
     }

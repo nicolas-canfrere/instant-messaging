@@ -33,6 +33,7 @@ function message(overrides: Partial<StoredMessage>): StoredMessage {
     editedAt: null,
     deletedAt: null,
     status: 'sent',
+    media: [],
     ...overrides,
   };
 }
@@ -53,6 +54,7 @@ function renderList(thread: Thread) {
       onLoadOlder={vi.fn()}
       onDeleteMessage={vi.fn()}
       onEditMessage={vi.fn()}
+      onMediaExpired={vi.fn()}
     />,
   );
 }

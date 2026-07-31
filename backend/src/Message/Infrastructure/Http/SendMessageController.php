@@ -7,9 +7,11 @@ namespace App\Message\Infrastructure\Http;
 use App\Message\Application\Command\SendMessageCommand;
 use App\Message\Application\Query\FindMessageByClientKeyQuery;
 use App\Message\Domain\ClientMessageId;
+use App\Message\Domain\EmptyMessageException;
 use App\Message\Domain\MessageContent;
 use App\Message\Infrastructure\Http\Payload\SendMessagePayload;
 use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Domain\IdGeneratorInterface;
 use App\Shared\Infrastructure\Bus\CommandDispatcher;
@@ -44,11 +46,30 @@ final readonly class SendMessageController
         $clientMessageId = ClientMessageId::fromString($payload->clientMessageId);
         $messageId = MessageId::fromString($this->idGenerator->generate());
 
+        $content = null === $payload->content ? null : MessageContent::fromString($payload->content);
+        // `SendMessagePayload::$mediaIds` est annote `array<string>`, pas
+        // `list<string>` : un corps JSON `{"0": "...", "a": "..."}`
+        // deserialise en tableau a cles NON sequentielles. `array_values()`
+        // le convertit ici en vraie liste, sans quoi une cle de tableau
+        // percerait dans `position` (SMALLINT) via le
+        // `foreach (... as $position => $mediaId)` du repository.
+        $mediaIds = array_map(
+            static fn(string $mediaId): MediaId => MediaId::fromString($mediaId),
+            array_values($payload->mediaIds),
+        );
+
+        // Regle qui depend de DEUX champs : elle ne peut pas s'exprimer en
+        // contrainte. Meme traitement que « un groupe requiert un titre ».
+        if (null === $content && [] === $mediaIds) {
+            throw EmptyMessageException::create();
+        }
+
         $this->commands->dispatch(new SendMessageCommand(
             $messageId,
             $conversationId,
             $senderId,
-            MessageContent::fromString($payload->content),
+            $content,
+            $mediaIds,
             $clientMessageId,
         ));
 

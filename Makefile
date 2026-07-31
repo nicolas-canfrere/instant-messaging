@@ -149,6 +149,18 @@ DOCKER_COMPOSE_TEST_FILE ?= compose.test.yaml
 DOCKER_COMPOSE_TEST = docker compose --progress quiet -p instant-messaging-test -f $(DOCKER_COMPOSE_TEST_FILE)
 DOCKER_COMPOSE_TEST_RUN = $(DOCKER_COMPOSE_TEST) run --rm --remove-orphans $(DOCKER_COMPOSE_RUN_FLAGS)
 
+# `backend-test` construit depuis le même `backend/Dockerfile` que `backend`,
+# mais Docker ne recompile jamais une image toute seule : ajouter une
+# extension au Dockerfile (ex. gd/amqp en tâche 1) laisse l'image de test
+# périmée jusqu'à un rebuild explicite. Le symptôme ne dit pas « image
+# périmée » — il dit « Call to undefined function imagecreatefromstring() »,
+# ce qui se lit comme un bug de code. Cette cible est le rappel : si
+# `unit-test`/`functional-test` échoue sur une fonction introuvable après
+# avoir touché le Dockerfile, lancer `make test-build` avant de chercher plus
+# loin.
+test-build: ## Rebuild the test images (needed after editing backend/Dockerfile)
+	@$(DOCKER_COMPOSE_TEST) build
+
 test: unit-test functional-test ## Run the whole test suite
 
 # Le domaine et l'application ne touchent ni la base ni le noyau : `--no-deps`
@@ -167,7 +179,7 @@ unit-test: ## Run unit tests. Usage: make unit-test ARGS="--filter=UlidIdentifie
 # la main propre. Le code de sortie de PHPUnit est propagé au travers du
 # nettoyage, sinon un échec de test passerait pour un succès en CI.
 functional-test: test-down ## Run functional tests. Usage: make functional-test ARGS="--filter=PingTest"
-	@$(DOCKER_COMPOSE_TEST) up -d --wait postgres-test redis-test
+	@$(DOCKER_COMPOSE_TEST) up -d --wait postgres-test redis-test minio-test
 	@$(DOCKER_COMPOSE_TEST_RUN) backend-test sh -c "php bin/console doctrine:database:create --if-not-exists -n -q \
 	&& php bin/console doctrine:migrations:migrate -n -q --allow-no-migration \
 	&& php bin/console app:fixtures:load -q \

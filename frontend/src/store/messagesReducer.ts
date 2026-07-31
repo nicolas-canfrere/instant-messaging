@@ -10,6 +10,26 @@
 
 export type MessageStatus = 'pending' | 'sent' | 'failed';
 
+export type MediaStatus = 'pending' | 'processing' | 'ready' | 'rejected';
+
+/**
+ * Une image portee par un message, cote store.
+ *
+ * `previewUrl` n'a pas d'equivalent serveur : c'est la `blob:` URL locale de
+ * l'expediteur, la seule chose affichable tant que le worker n'a pas produit de
+ * miniature. Elle est nulle chez tous les AUTRES membres du fil, qui n'ont pas
+ * les octets — eux voient un emplacement en attente jusqu'a `message.media_ready`.
+ */
+export type StoredMedia = {
+  id: string;
+  status: MediaStatus;
+  url: string | null;
+  thumbnailUrl: string | null;
+  width: number | null;
+  height: number | null;
+  previewUrl: string | null;
+};
+
 export type StoredMessage = {
   id: string | null;
   clientMessageId: string;
@@ -20,6 +40,8 @@ export type StoredMessage = {
   editedAt: string | null;
   deletedAt: string | null;
   status: MessageStatus;
+  /** Vide pour un message texte-seul. */
+  media: StoredMedia[];
 };
 
 export type Thread = {
@@ -48,6 +70,18 @@ export type MessagesAction =
       // une chaine vide, que `MessageList` lisait comme « modifie » puisqu'elle
       // n'est pas `null`. Le type doit pouvoir dire ce que le serveur dit.
       editedAt: string | null;
+    }
+  | {
+      type: 'media/ready';
+      conversationId: string;
+      messageId: string;
+      /**
+       * La vue COMPLETE du media, telle que le serveur la resigne au moment de
+       * pousser : elle remplace l'entree existante en bloc plutot que de la
+       * rapiecer champ par champ. Un media passe de `processing` a `ready` ou
+       * `rejected` d'un seul coup, jamais a moitie.
+       */
+      media: StoredMedia;
     };
 
 const EMPTY_THREAD: Thread = { items: [], nextBefore: null, loaded: false };
@@ -74,8 +108,37 @@ function upsert(items: StoredMessage[], incoming: StoredMessage): StoredMessage[
   const byClientId = items.findIndex((item) => item.clientMessageId === incoming.clientMessageId);
 
   if (byClientId !== -1) {
+    const existing = items[byClientId];
     const merged = [...items];
-    merged[byClientId] = { ...incoming, status: 'sent' };
+
+    merged[byClientId] = {
+      ...incoming,
+      status: 'sent',
+      // Les medias de l'envoi optimiste SURVIVENT a l'echo SSE. La charge utile
+      // de `message.created` ne les porte pas — au moment ou elle part, le
+      // worker n'a rien inspecte — donc la recopier telle quelle effacerait les
+      // apercus locaux au moment meme ou le serveur confirme l'envoi.
+      //
+      // Une liste NON vide gagne, MAIS les apercus locaux sont reportes : le
+      // serveur ne les connait pas, et un media encore `processing` n'a aucune
+      // URL a offrir. Sans ce report, l'expediteur verrait son image remplacee
+      // par un placeholder au moment ou le serveur accuse reception.
+      media:
+        incoming.media.length > 0
+          ? incoming.media.map((media) => ({
+              ...media,
+              // Report UNIQUEMENT tant que le serveur n'a rien a servir. Des
+              // qu'il tient une URL, l'apercu local a fini son service et le
+              // garder retiendrait le fichier en memoire pour rien.
+              previewUrl:
+                media.url !== null
+                  ? null
+                  : (media.previewUrl ??
+                    existing?.media.find((local) => local.id === media.id)?.previewUrl ??
+                    null),
+            }))
+          : (existing?.media ?? []),
+    };
 
     return merged.sort(compare);
   }
@@ -135,6 +198,58 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
             : item,
         ),
       }));
+
+    case 'media/ready': {
+      // Pas de `patchThread` ici, et c'est le point de ce cas : cet evenement
+      // arrive pour TOUTES les conversations auxquelles on est abonne, y
+      // compris celles dont le fil n'a jamais ete charge. `patchThread`
+      // fabriquerait un fil vide pour chacune d'elles, et rendrait surtout un
+      // `state` neuf a chaque fois — donc un re-rendu de toute la liste pour
+      // une image qui n'est affichee nulle part.
+      const thread = state.threads[action.conversationId];
+
+      if (thread === undefined) {
+        return state;
+      }
+
+      let changed = false;
+
+      const items = thread.items.map((item) => {
+        // Par `id` SERVEUR : le message est deja persiste quand cet evenement
+        // part, il n'y a donc pas de passe `client_message_id` a faire.
+        if (item.id !== action.messageId) {
+          return item;
+        }
+
+        const known = item.media.some((existing) => existing.id === action.media.id);
+
+        changed = true;
+
+        // Le media n'est pas force d'etre deja la, et c'est le cas NORMAL chez
+        // les destinataires : `message.created` ne porte aucun media, leur
+        // bulle arrive donc vide. C'est cet evenement-ci qui la remplit.
+        //
+        // L'ordre est celui d'arrivee, faute de mieux : la charge utile ne
+        // transporte pas `position`. Avec plusieurs images d'un meme message,
+        // elles peuvent donc s'afficher dans un autre ordre que chez
+        // l'expediteur, jusqu'au prochain chargement d'historique qui remet la
+        // liste dans l'ordre du serveur.
+        const media = known
+          ? item.media.map((existing) => (existing.id === action.media.id ? action.media : existing))
+          : [...item.media, action.media];
+
+        return { ...item, media };
+      });
+
+      // Meme REFERENCE quand l'evenement ne concerne rien d'affiche : message
+      // absent du fil, ou media absent de ce message. React ne re-rend alors
+      // pas. Un media retrouve est en revanche remplace meme s'il est
+      // identique — comparer champ a champ pour economiser un rendu de plus
+      // couterait plus cher que le rendu evite.
+      return changed
+        ? { threads: { ...state.threads, [action.conversationId]: { ...thread, items } } }
+        : state;
+    }
 
     case 'message/deleted':
       // Applique par `id` SERVEUR : contrairement a l'envoi, il n'y a pas de

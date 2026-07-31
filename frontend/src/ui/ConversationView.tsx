@@ -4,6 +4,7 @@ import type { Thread } from '../store/messagesReducer';
 import type { ReceiptsState } from '../store/receiptsReducer';
 import type { TypingState } from '../store/typingReducer';
 import { Composer } from './Composer';
+import type { TakenMedia } from '../hooks/useMediaUpload';
 import { conversationTitle } from './labels';
 import { MembersPanel } from './MembersPanel';
 import { MessageList } from './MessageList';
@@ -18,9 +19,10 @@ type Props = {
   typingState: TypingState;
   receiptsState: ReceiptsState;
   onLoadOlder: () => void;
-  onSend: (content: string) => Promise<void>;
+  onSend: (content: string, media: TakenMedia[]) => Promise<void>;
   onDeleteMessage: (messageId: string) => void;
   onEditMessage: (messageId: string, content: string) => void;
+  onMediaExpired: () => void;
   onTyping: () => void;
   onLeave: () => Promise<void>;
 };
@@ -37,6 +39,7 @@ export function ConversationView({
   onSend,
   onDeleteMessage,
   onEditMessage,
+  onMediaExpired,
   onTyping,
   onLeave,
 }: Props) {
@@ -92,6 +95,7 @@ export function ConversationView({
           onLoadOlder={onLoadOlder}
           onDeleteMessage={onDeleteMessage}
           onEditMessage={onEditMessage}
+          onMediaExpired={onMediaExpired}
         />
 
         {/*

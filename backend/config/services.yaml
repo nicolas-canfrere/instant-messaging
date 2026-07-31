@@ -7,6 +7,13 @@
 # Put parameters here that don't need to change on each machine where the app is deployed
 # https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
 parameters:
+    # `false` ici : `minio-create-bucket` (compose.yaml) cree deja le bucket au
+    # demarrage. `services_test.yaml` la relève a `true`, seul environnement
+    # sans cette aide. Un parametre plutot qu'une redefinition complete du
+    # service : redefinir `S3MediaStorage` dans `services_test.yaml`
+    # ecraserait ses AUTRES arguments (cf. le commentaire sur
+    # DbalMediaRepository dans ce meme fichier).
+    media.create_bucket_if_missing: false
 
 services:
     # default configuration for services in *this* file
@@ -65,7 +72,50 @@ services:
     App\Message\Domain\MessageRepositoryInterface: '@App\Message\Infrastructure\Persistence\DbalMessageRepository'
     App\Message\Application\Query\MessageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessageReader'
     App\Message\Application\Query\MessagePageReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessagePageReader'
+    App\Message\Application\Query\MessagesCarryingMediaReaderInterface: '@App\Message\Infrastructure\Persistence\DbalMessagesCarryingMediaReader'
     App\Shared\Application\Bus\CommandDispatcherInterface: '@App\Shared\Infrastructure\Bus\CommandDispatcher'
+    App\Shared\Application\Bus\DomainEventDispatcherInterface: '@App\Shared\Infrastructure\Bus\DomainEventDispatcher'
+    App\Media\Domain\MediaRepositoryInterface: '@App\Media\Infrastructure\Persistence\DbalMediaRepository'
+    App\Media\Application\Query\UploadTicketReaderInterface: '@App\Media\Infrastructure\Persistence\DbalUploadTicketReader'
+    App\Media\Application\Query\OrphanMediaReaderInterface: '@App\Media\Infrastructure\Persistence\DbalOrphanMediaReader'
+    App\Media\Application\MediaStorageInterface: '@App\Media\Infrastructure\Storage\S3MediaStorage'
+    App\Media\Application\ImageInspectorInterface: '@App\Media\Infrastructure\Image\GdImageInspector'
+    App\Media\Application\Contract\MediaOwnershipInterface: '@App\Media\Infrastructure\Contract\DbalMediaOwnership'
+    App\Media\Application\Contract\MediaFinderInterface: '@App\Media\Infrastructure\Contract\DbalMediaFinder'
+    App\Message\Domain\Port\MediaOwnershipPortInterface: '@App\Message\Infrastructure\Contract\MediaOwnershipAdapter'
+
+    # Deux clients S3, deux endpoints. Le signeur ne sert QU'A signer : il ne
+    # doit jamais emettre de requete, `localhost:8080` n'etant pas joignable
+    # depuis le conteneur backend. Le jour d'un vrai S3, seul
+    # `use_path_style_endpoint` disparait.
+    media.s3.internal:
+        class: Aws\S3\S3Client
+        arguments:
+            - version: 'latest'
+              region: 'us-east-1'
+              endpoint: '%env(MEDIA_S3_INTERNAL_ENDPOINT)%'
+              use_path_style_endpoint: true
+              credentials:
+                  key: '%env(MEDIA_S3_KEY)%'
+                  secret: '%env(MEDIA_S3_SECRET)%'
+
+    media.s3.signer:
+        class: Aws\S3\S3Client
+        arguments:
+            - version: 'latest'
+              region: 'us-east-1'
+              endpoint: '%env(MEDIA_S3_PUBLIC_ENDPOINT)%'
+              use_path_style_endpoint: true
+              credentials:
+                  key: '%env(MEDIA_S3_KEY)%'
+                  secret: '%env(MEDIA_S3_SECRET)%'
+
+    App\Media\Infrastructure\Storage\S3MediaStorage:
+        arguments:
+            $internalClient: '@media.s3.internal'
+            $signerClient: '@media.s3.signer'
+            $bucket: '%env(MEDIA_BUCKET)%'
+            $createBucketIfMissing: '%media.create_bucket_if_missing%'
 
     # Le meme convertisseur que celui du serialiseur, pour que les chemins de
     # violation sortent en snake_case comme le reste de l'API.

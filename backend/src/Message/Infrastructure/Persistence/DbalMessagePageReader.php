@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace App\Message\Infrastructure\Persistence;
 
+use App\Media\Application\Contract\MediaFinderInterface;
+use App\Media\Application\Contract\MediaView;
 use App\Message\Application\Query\MessagePageReaderInterface;
 use App\Message\Application\Query\MessageView;
 use App\Shared\Domain\Identifier\ConversationId;
+use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\MessageId;
 use App\Shared\Infrastructure\Persistence\DatabaseTimestamp;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\ParameterType;
 
@@ -31,8 +35,10 @@ use Doctrine\DBAL\ParameterType;
  */
 final readonly class DbalMessagePageReader implements MessagePageReaderInterface
 {
-    public function __construct(private Connection $connection)
-    {
+    public function __construct(
+        private Connection $connection,
+        private MediaFinderInterface $mediaFinder,
+    ) {
     }
 
     public function page(ConversationId $conversationId, ?MessageId $before, int $limit): array
@@ -68,6 +74,8 @@ final readonly class DbalMessagePageReader implements MessagePageReaderInterface
             ['limit' => ParameterType::INTEGER],
         );
 
+        $mediaByMessage = $this->mediaOf(array_column($rows, 'id'));
+
         return array_map(
             static fn(array $row): MessageView => new MessageView(
                 $row['id'],
@@ -78,8 +86,60 @@ final readonly class DbalMessagePageReader implements MessagePageReaderInterface
                 DatabaseTimestamp::toAtom($row['created_at']),
                 DatabaseTimestamp::toAtom($row['edited_at']),
                 DatabaseTimestamp::toAtom($row['deleted_at']),
+                $mediaByMessage[$row['id']] ?? [],
             ),
             $rows,
         );
+    }
+
+    /**
+     * DEUX requetes pour toute la page, jamais deux par message : le N+1 est le
+     * piege evident ici, et `MessageMediaReadTest` le verrouille par un
+     * compteur de requetes.
+     *
+     * @param list<string> $messageIds
+     *
+     * @return array<string, list<MediaView>> indexe par message, dans l'ordre d'affichage
+     */
+    private function mediaOf(array $messageIds): array
+    {
+        if ([] === $messageIds) {
+            return [];
+        }
+
+        /** @var list<array{message_id: string, media_id: string}> $links */
+        $links = $this->connection->fetchAllAssociative(
+            <<<'SQL'
+                SELECT message_id, media_id
+                FROM message_media
+                WHERE message_id IN (:message_ids)
+                ORDER BY message_id, position
+                SQL,
+            ['message_ids' => $messageIds],
+            ['message_ids' => ArrayParameterType::STRING],
+        );
+
+        if ([] === $links) {
+            return [];
+        }
+
+        // `ORDER BY position` ci-dessus porte jusqu'ici : les vues sont
+        // indexees par ULID, mais c'est l'ordre des LIAISONS qu'on parcourt.
+        $views = $this->mediaFinder->viewsFor(array_map(
+            static fn(array $link): MediaId => MediaId::fromString($link['media_id']),
+            $links,
+        ));
+
+        $mediaByMessage = [];
+        foreach ($links as $link) {
+            // Un media absent des vues a disparu entre les deux requetes (une
+            // purge, par exemple). La liaison est alors ignoree plutot que
+            // rendue vide : une lecture d'historique n'a pas a echouer pour ca.
+            if (isset($views[$link['media_id']])) {
+                $mediaByMessage[$link['message_id']][] = $views[$link['media_id']];
+            }
+        }
+
+        return $mediaByMessage;
     }
 }
