@@ -23,6 +23,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
+use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
 
 /**
@@ -298,7 +299,12 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         $inspector->expects(self::never())->method('measure');
 
         $logger = $this->createMock(LoggerInterface::class);
+        // `warning()` seul ne suffit pas a prouver l'absence de bruit : un
+        // rejet passe par `log($level, …)`, pas par `warning()` directement.
+        // Verifier aussi `log()` couvre le cas ou une future regression
+        // ferait passer ce chemin (accepte silencieusement) par un rejet.
         $logger->expects(self::never())->method('warning');
+        $logger->expects(self::never())->method('log');
 
         $handler = $this->handler($media, $storage, $detector, $inspector, $logger);
 
@@ -306,6 +312,69 @@ final class ProcessMediaCommandHandlerTest extends TestCase
 
         self::assertSame(MediaStatus::Ready, $media->status());
         self::assertSame(MediaMimeType::Text, $media->mimeType());
+    }
+
+    public function testAnUnsupportedTypeRejectionIsLoggedAtWarningLevel(): void
+    {
+        // `UnsupportedType` est le seul motif de rejet ou l'operateur doit
+        // regarder (deguisement de type, signal de securite) : il doit sortir
+        // en WARNING. Le handler appelle `$logger->log($level, …)`, pas
+        // `$logger->warning(…)` directement — seule une assertion sur `log()`
+        // avec le niveau attendu prouve que ce chemin est bien au bon niveau.
+        $mediaId = MediaId::fromString('01JQZ00000000000000009000C');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaRejectionReason::UnsupportedType);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('log')->with(LogLevel::WARNING, self::isString(), self::isArray());
+
+        $handler = $this->handler($media, $storage, $detector, $inspector, $logger);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedType, $media->rejectionReason());
+    }
+
+    public function testAnUnsupportedEncodingRejectionIsLoggedAtNoticeLevel(): void
+    {
+        // `UnsupportedEncoding` existe precisement pour qu'un CSV cp1252
+        // ordinaire ne declenche PAS l'alerte de securite reservee a
+        // `UnsupportedType` (plan T4 amende expres pour ce motif) : il doit
+        // sortir en NOTICE, pas en WARNING.
+        $mediaId = MediaId::fromString('01JQZ00000000000000009000D');
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Text, 'export.csv');
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaRejectionReason::UnsupportedEncoding);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('log')->with(LogLevel::NOTICE, self::isString(), self::isArray());
+
+        $handler = $this->handler($media, $storage, $detector, $inspector, $logger);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedEncoding, $media->rejectionReason());
     }
 
     public function testADeclaredPdfMeasuredAsTextIsRejectedRatherThanServedUnderALyingName(): void

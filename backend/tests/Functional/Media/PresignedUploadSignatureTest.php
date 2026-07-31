@@ -146,6 +146,34 @@ final class PresignedUploadSignatureTest extends TestCase
     }
 
     /**
+     * Reproduit precisement le trou trouve en revue : `presignDownload()`
+     * n'emettait `ResponseContentDisposition` QUE si un nom etait fourni,
+     * si bien qu'un `Attachment` sans nom (le cas d'une miniature, ou tout
+     * futur appelant qui n'a pas de nom sous la main) ne portait AUCUN
+     * Content-Disposition — ni `attachment`, ni rien. La disposition est
+     * une decision de securite ; elle ne doit jamais dependre d'un
+     * parametre sans rapport comme le nom du fichier.
+     */
+    public function testAnAttachmentPresignWithNoFilenameStillCarriesTheAttachmentDisposition(): void
+    {
+        $key = StorageKey::forOriginal(MediaId::fromString('01JQZ0000000000000000000AE'), MediaMimeType::Jpeg);
+        $presigned = $this->storage->presignUpload($key, MediaMimeType::Jpeg, new \DateTimeImmutable());
+
+        $http = new HttpClient(['http_errors' => false]);
+        $http->put($presigned->url, [
+            'headers' => ['Content-Type' => 'image/jpeg'],
+            'body' => 'contenu-de-test',
+        ]);
+
+        $downloadUrl = $this->storage->presignDownload($key, MediaDisposition::Attachment, null, new \DateTimeImmutable());
+
+        $getResponse = $http->get($downloadUrl);
+
+        self::assertSame(200, $getResponse->getStatusCode());
+        self::assertSame('attachment', $getResponse->getHeaderLine('Content-Disposition'));
+    }
+
+    /**
      * `X-Amz-Expires` est une DUREE relative a l'instant reel de signature —
      * pas un instant absolu qu'on pourrait antidater via le `$now` passe a
      * `presignUpload()`. Le SDK refuse meme une duree negative avant d'avoir

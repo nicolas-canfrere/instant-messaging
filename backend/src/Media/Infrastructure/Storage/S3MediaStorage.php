@@ -82,11 +82,14 @@ final readonly class S3MediaStorage implements MediaStorageInterface
         ?OriginalFilename $filename,
         \DateTimeImmutable $now,
     ): string {
-        $parameters = ['Bucket' => $this->bucket, 'Key' => $key->toString()];
-
-        if (null !== $filename) {
-            $parameters['ResponseContentDisposition'] = $this->contentDisposition($disposition, $filename);
-        }
+        $parameters = [
+            'Bucket' => $this->bucket,
+            'Key' => $key->toString(),
+            // Toujours emis, meme sans nom : la disposition (inline/attachment)
+            // est une decision de securite, elle ne doit jamais dependre d'un
+            // parametre sans rapport (le nom du fichier).
+            'ResponseContentDisposition' => $this->contentDisposition($disposition, $filename),
+        ];
 
         if (MediaDisposition::Attachment === $disposition) {
             // Le navigateur ne doit rien deduire du type : il telecharge, point.
@@ -214,9 +217,17 @@ final readonly class S3MediaStorage implements MediaStorageInterface
      * Le VO OriginalFilename a deja interdit les caracteres de controle ; il
      * reste a neutraliser le guillemet et l'antislash, qui fermeraient la
      * chaine citee.
+     *
+     * `$filename` peut etre absent (cas de la miniature, qui n'a pas de nom
+     * d'origine) : la disposition seule (`inline`/`attachment`) reste alors
+     * emise, sans les parametres `filename`/`filename*`.
      */
-    private function contentDisposition(MediaDisposition $disposition, OriginalFilename $filename): string
+    private function contentDisposition(MediaDisposition $disposition, ?OriginalFilename $filename): string
     {
+        if (null === $filename) {
+            return $disposition->value;
+        }
+
         $name = $filename->toString();
         $ascii = preg_replace('/[^\x20-\x7E]/', '_', $name) ?? 'fichier';
         $ascii = str_replace(['\\', '"'], '_', $ascii);

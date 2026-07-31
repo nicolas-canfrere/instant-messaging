@@ -149,6 +149,32 @@ describe('MessageMedia', () => {
     expect(ready.firstElementChild?.className).toContain('h-14');
   });
 
+  it('affiche une image des que le worker a tranche le mimeType, meme si le nom trompe', () => {
+    // `filename` porte une extension de document (`.csv`) mais `mimeType` dit
+    // "image" : ce conflit force `isDocument` a passer par la branche
+    // `mimeType !== null`, jamais par le repli sur l'extension — sans quoi ce
+    // test rendrait quand meme une image "par accident" (un `.jpg` n'aurait
+    // rien prouve, cf. revue finale). C'est l'etat regulier apres traitement
+    // par le worker, pour CHAQUE image de l'application.
+    render(
+      <MessageMedia
+        media={media({
+          status: 'ready',
+          mimeType: 'image/jpeg',
+          filename: 'export.csv',
+          url: 'https://stockage.test/original?X-Amz-Signature=abc',
+          thumbnailUrl: 'https://stockage.test/thumb?X-Amz-Signature=abc',
+          width: 1600,
+          height: 900,
+        })}
+        onExpired={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('img')).not.toBeNull();
+    expect(screen.queryByText('export.csv')).toBeNull();
+  });
+
   it("n'affiche aucun apercu local pour un document en cours", () => {
     // L'expediteur d'un PDF voit la meme chose que les autres : il n'y a rien
     // a previsualiser. C'est la difference avec le cas image.
