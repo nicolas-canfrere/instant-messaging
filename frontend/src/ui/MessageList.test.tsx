@@ -54,6 +54,7 @@ function renderList(thread: Thread) {
       onLoadOlder={vi.fn()}
       onDeleteMessage={vi.fn()}
       onEditMessage={vi.fn()}
+      onMediaExpired={vi.fn()}
     />,
   );
 }

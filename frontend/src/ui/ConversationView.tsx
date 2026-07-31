@@ -22,6 +22,7 @@ type Props = {
   onSend: (content: string, media: TakenMedia[]) => Promise<void>;
   onDeleteMessage: (messageId: string) => void;
   onEditMessage: (messageId: string, content: string) => void;
+  onMediaExpired: () => void;
   onTyping: () => void;
   onLeave: () => Promise<void>;
 };
@@ -38,6 +39,7 @@ export function ConversationView({
   onSend,
   onDeleteMessage,
   onEditMessage,
+  onMediaExpired,
   onTyping,
   onLeave,
 }: Props) {
@@ -93,6 +95,7 @@ export function ConversationView({
           onLoadOlder={onLoadOlder}
           onDeleteMessage={onDeleteMessage}
           onEditMessage={onEditMessage}
+          onMediaExpired={onMediaExpired}
         />
 
         {/*

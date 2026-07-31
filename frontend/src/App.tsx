@@ -86,6 +86,7 @@ function Workspace({ me, onLogout }: { me: Me; onLogout: () => void }) {
     notifyTyping,
     selectConversation,
     loadOlder,
+    refreshMediaUrls,
     send,
     deleteMessage,
     editMessage,
@@ -156,6 +157,10 @@ function Workspace({ me, onLogout }: { me: Me; onLogout: () => void }) {
               );
             });
           }}
+          // Une miniature qui refuse de se charger est, presque toujours, une
+          // URL signee perimee : l'onglet est reste ouvert plus de quinze
+          // minutes. Recharger la page de messages en obtient de fraiches.
+          onMediaExpired={refreshMediaUrls}
           onTyping={() => notifyTyping(selected.id)}
           // Pas de `window.alert` ici, contrairement a `onDeleteMessage` et
           // `onEditMessage` ci-dessus : la promesse est rendue telle quelle au

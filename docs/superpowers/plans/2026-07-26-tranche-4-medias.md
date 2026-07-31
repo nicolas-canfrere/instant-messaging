@@ -4127,6 +4127,12 @@ make front-test && make front-typecheck
 
 Puis les deux navigateurs : Alice envoie, Bob voit le placeholder puis l'image, **sans rafraîchir**.
 
+> **Fait — et le critère N'EST PAS tenu.** Vérifié à deux navigateurs (Alice et Bob, sessions distinctes). Ce qui marche : l'aperçu local d'Alice reste affiché pendant le traitement ; les images de l'historique s'affichent chez les deux. Ce qui ne marche pas : **la bulle de Bob reste vide**, sans placeholder ni image.
+>
+> Cause, vérifiée dans les logs du worker (`MessageMediaBecameReady` : 0 occurrence) : le worker termine **avant** l'envoi du message — il met ~50 ms là où l'utilisateur met plusieurs secondes à écrire. `PropagateMediaReadyListener` ne trouve donc aucun message porteur, ne publie rien, et c'est le comportement voulu (spec §3.5). Mais alors **plus rien** n'annonce l'image à Bob : `message.created` ne porte pas les médias.
+>
+> Autrement dit, la chorégraphie de la tâche 8 ne se déclenche que si le traitement est plus lent que la frappe — un cas rare. Le cas courant n'a aucun chemin. **Correctif nécessaire hors de cette tâche** : faire porter `media` à la charge utile de `message.created` (ajout additif au contrat temps réel). Deux régressions trouvées au passage et corrigées ici : l'écho SSE effaçait les aperçus de l'expéditeur, et `media/ready` ne savait pas insérer un média absent du message.
+
 - [ ] **Step 6: Commit**
 
 ```bash

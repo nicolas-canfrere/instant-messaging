@@ -16,6 +16,7 @@ import {
 import { canStillEdit, deletedMessageLabel, editedMessageLabel, formatTime, userName } from './labels';
 import { MessageActions } from './MessageActions';
 import { MessageEditor } from './MessageEditor';
+import { MessageMedia } from './MessageMedia';
 import { ReceiptTicks } from './ReceiptTicks';
 import { useScrollAnchor } from './useScrollAnchor';
 
@@ -46,6 +47,12 @@ type Props = {
   onLoadOlder: () => void;
   onDeleteMessage: (messageId: string) => void;
   onEditMessage: (messageId: string, content: string) => void;
+  /**
+   * Appele quand une URL signee s'avere perimee : l'appelant recharge la page
+   * de messages, ce qui en obtient de fraiches. Le composant, lui, ne sait pas
+   * comment on resigne — il constate seulement que ca a echoue.
+   */
+  onMediaExpired: () => void;
 };
 
 /**
@@ -64,6 +71,7 @@ export function MessageList({
   onLoadOlder,
   onDeleteMessage,
   onEditMessage,
+  onMediaExpired,
 }: Props) {
   const container = useRef<HTMLDivElement | null>(null);
   /** L'utilisateur suivait-il le bas du fil juste avant ce rendu ? En ref : ne doit pas re-rendre. */
@@ -232,6 +240,18 @@ export function MessageList({
                 ) : (
                   <p className="whitespace-pre-wrap break-words">{message.content}</p>
                 )}
+
+                {/*
+                  Apres le texte, jamais avant : un message peut porter les deux,
+                  et la legende se lit au-dessus de ce qu'elle legende.
+
+                  Rien n'est rendu pour un tombstone — supprimer pour tous
+                  detache les medias cote serveur, `media` est donc vide.
+                */}
+                {message.deletedAt === null &&
+                  message.media.map((media) => (
+                    <MessageMedia key={media.id} media={media} onExpired={onMediaExpired} />
+                  ))}
 
                 {/*
                   Seulement sur SES propres messages vivants et acquittes : un

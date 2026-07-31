@@ -71,6 +71,7 @@ describe('ConversationView', () => {
       onSend: vi.fn(async () => {}),
       onDeleteMessage: vi.fn(),
       onEditMessage: vi.fn(),
+      onMediaExpired: vi.fn(),
       onTyping: vi.fn(),
       onLeave: vi.fn(async () => {}),
     };

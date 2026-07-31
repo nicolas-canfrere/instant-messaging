@@ -76,6 +76,7 @@ const NAMED_EVENTS = [
   'receipt.updated',
   'message.deleted',
   'message.edited',
+  'message.media_ready',
 ];
 
 /**
@@ -160,10 +161,54 @@ function toStoredMessage(payload: Record<string, unknown>): StoredMessage {
     // ensuite par son propre `message.media_ready`.
     //
     // Consequence a connaitre : entre les deux, un destinataire voit la bulle
-    // sans ses images. C'est la tache 10 qui la remplit — rien ici ne consomme
-    // encore `message.media_ready`.
+    // avec des emplacements en attente. C'est `message.media_ready`, traite
+    // plus bas, qui les remplit un par un.
     media: [],
   };
+}
+
+/**
+ * Charge utile de `message.media_ready` :
+ * `{ message_id, conversation_id, media: { id, status, mime_type, width, height, url, thumbnail_url } }`
+ * (voir `PublishMessageMediaBecameReadyListener.php`).
+ *
+ * `previewUrl: null` : cet objet vient du serveur, qui n'a jamais eu l'apercu
+ * local de l'expediteur. C'est justement le moment ou l'on cesse d'en avoir
+ * besoin — le serveur a desormais une vraie miniature.
+ */
+function toStoredMedia(payload: Record<string, unknown>): StoredMedia | null {
+  const media = payload['media'];
+
+  if (typeof media !== 'object' || media === null) {
+    return null;
+  }
+
+  const fields = media as Record<string, unknown>;
+  const id = readString(fields, 'id');
+  const status = readString(fields, 'status');
+
+  // Un statut hors des quatre connus signalerait un backend et un front
+  // desaccordes : on ignore plutot que d'afficher un etat qu'on ne sait pas rendre.
+  if (id === '' || !['pending', 'processing', 'ready', 'rejected'].includes(status)) {
+    return null;
+  }
+
+  return {
+    id,
+    status: status as StoredMedia['status'],
+    url: readNullableString(fields, 'url'),
+    thumbnailUrl: readNullableString(fields, 'thumbnail_url'),
+    width: readNullableNumber(fields, 'width'),
+    height: readNullableNumber(fields, 'height'),
+    previewUrl: null,
+  };
+}
+
+/** Comme `readNullableString`, pour les dimensions. */
+function readNullableNumber(payload: Record<string, unknown>, key: string): number | null {
+  const value = payload[key];
+
+  return typeof value === 'number' ? value : null;
 }
 
 /**
@@ -214,6 +259,12 @@ export type AppState = {
   notifyTyping: (conversationId: string) => void;
   selectConversation: (conversationId: string) => void;
   loadOlder: () => void;
+  /**
+   * Recharge la page courante de messages pour obtenir des URL de medias
+   * fraichement signees. Appele quand une miniature refuse de se charger : une
+   * URL pre-signee vit quinze minutes, un onglet reste ouvert plus longtemps.
+   */
+  refreshMediaUrls: () => void;
   refreshConversations: () => Promise<void>;
   send: (conversationId: string, content: string, media?: TakenMedia[]) => Promise<void>;
   deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
@@ -311,6 +362,17 @@ export function useAppState(me: Me): AppState {
     if (thread.nextBefore === null) return;
 
     void loadPage(conversationId, thread.nextBefore);
+  }, [loadPage]);
+
+  const refreshMediaUrls = useCallback(() => {
+    const conversationId = selectedIdRef.current;
+
+    if (conversationId === null) return;
+
+    // Sans curseur : on redemande la page la plus recente. `page/loaded` fait
+    // un upsert, donc les messages deja presents sont mis a jour sur place,
+    // avec leurs medias resignes — rien n'est duplique ni perdu.
+    void loadPage(conversationId);
   }, [loadPage]);
 
   const send = useCallback(
@@ -682,6 +744,35 @@ export function useAppState(me: Me): AppState {
           return;
         }
 
+        if (event.type === 'message.media_ready') {
+          const media = toStoredMedia(event.payload);
+
+          if (media === null) {
+            return;
+          }
+
+          const conversationId = readString(event.payload, 'conversation_id');
+          const messageId = readString(event.payload, 'message_id');
+
+          // L'apercu local de l'expediteur a fini son service : le serveur a
+          // desormais une miniature. On rend sa memoire AVANT de remplacer
+          // l'entree, seul instant ou l'on tient encore la `blob:` URL.
+          //
+          // Chez les autres membres du fil, il n'y a rien a revoquer : ils
+          // n'ont jamais eu les octets. C'est le meme code pour les deux.
+          const previous = selectThread(messagesStateRef.current, conversationId)
+            .items.find((item) => item.id === messageId)
+            ?.media.find((item) => item.id === media.id);
+
+          if (previous?.previewUrl != null) {
+            URL.revokeObjectURL(previous.previewUrl);
+          }
+
+          dispatch({ type: 'media/ready', conversationId, messageId, media });
+
+          return;
+        }
+
         if (event.type === 'receipt.updated') {
           dispatchReceipts({
             type: 'receipt/updated',
@@ -773,6 +864,7 @@ export function useAppState(me: Me): AppState {
     notifyTyping,
     selectConversation,
     loadOlder,
+    refreshMediaUrls,
     refreshConversations,
     send,
     deleteMessage,
