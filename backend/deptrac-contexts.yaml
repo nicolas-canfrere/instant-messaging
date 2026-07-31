@@ -91,7 +91,12 @@ deptrac:
 
         # Allowlist explicite : ajouter un couplage inter-contextes demande de
         # modifier cette ligne. La friction est voulue.
-        Realtime: [Shared, ConversationContract, Vendor]
+        #
+        # Realtime gagne MediaContract (tache 8 de T4) : il resigne la vue d'un
+        # media au moment de la pousser, une URL pre-signee ne pouvant pas
+        # voyager dans un evenement. Elargissement delibere, vers une surface
+        # publiee.
+        Realtime: [Shared, ConversationContract, MediaContract, Vendor]
 
         # Media ne connait NI les conversations NI les messages : son allowlist
         # ne cite aucun autre contexte. C'est cette ignorance qui rendra son

@@ -3810,6 +3810,8 @@ Trois sauts, aucun contexte ne pilote l'autre (spec §6.1).
 - Produces : `MessagesCarryingMediaReaderInterface::carrying(MediaId): array` annotée `@return list<array{messageId: MessageId, conversationId: ConversationId}>`. La requête est un `SELECT mm.message_id, m.conversation_id FROM message_media mm JOIN messages m ON m.id = mm.message_id WHERE mm.media_id = :media_id` — le `UNIQUE (media_id)` en base garantit au plus une ligne, mais la signature reste une liste : c'est le schéma qui borne, pas le type de retour.
 - Create: `backend/src/Realtime/Application/EventListener/PublishMessageMediaBecameReadyListener.php`
 - Test: `backend/tests/Functional/Media/MediaReadyPublicationTest.php`
+- Create (non prévu) : `backend/src/Shared/Application/Bus/DomainEventDispatcherInterface.php` + `backend/src/Shared/Infrastructure/Bus/DomainEventDispatcher.php`. Le Step 3 ci-dessous affirmait qu'un tel port existait déjà — **c'était faux** : les listeners existants réagissent avec une *commande* (`CommandDispatcherInterface`), aucun n'émet un second domain event. Le collecteur ne convenait pas : un listener tourne **après** le commit, donc hors de la boucle de `TransactionalMiddleware` qui vide le collecteur.
+- Modify (non prévu) : `backend/config/packages/messenger.yaml` — le transport `media` passe de `in-memory://` à `test://` en test. C'est le DSN de `zenstruck/messenger-test`, le seul qui offre `->process()`. Sans lui, un test ne peut asserter que ce qui **part** vers la file, jamais ce que le worker en fait — or toute la chorégraphie démarre côté consommation, dans `TransactionalMiddleware`.
 
 - [ ] **Step 1: Écrire le test**
 
@@ -3856,11 +3858,11 @@ final readonly class PropagateMediaReadyListener implements DomainEventListenerI
 }
 ```
 
-`EventDispatcherInterface` ici est le port de `Shared/Application/` déjà utilisé par les listeners existants — **reprendre celui du projet**, ne pas injecter `MessageBusInterface`.
+~~`EventDispatcherInterface` ici est le port de `Shared/Application/` déjà utilisé par les listeners existants~~ — **ce port n'existait pas.** Il a été créé pour l'occasion sous le nom `DomainEventDispatcherInterface` (voir la liste de fichiers ci-dessus), aligné sur `DomainEventListenerInterface` / `DomainEventCollectorInterface` et distinct de l'`EventDispatcherInterface` de Symfony. La consigne de fond tient : ne pas injecter `MessageBusInterface` dans `Application`.
 
 - [ ] **Step 4: Le listener de `Realtime`**
 
-Calqué sur `PublishMessageWasSentListener`. Il consulte `MediaFinderPortInterface` pour obtenir le `MediaView` frais et signé, puis :
+Calqué sur `PublishMessageWasSentListener`. Il consulte `MediaFinderInterface` — le contrat publié de Media, nommé directement, `MediaFinderPortInterface` ayant été abandonné en tâche 7 — pour obtenir le `MediaView` frais et signé, puis :
 
 ```php
         $this->publisher->publish(
@@ -3887,6 +3889,8 @@ make up
 ```
 
 Ouvrir deux navigateurs (Alice et Bob), envoyer une image depuis Alice, et **constater chez Bob** le passage du placeholder à l'image **sans rafraîchir**. C'est le critère d'acceptation n°2 de la spec ; aucun test automatisé ne le remplace.
+
+> **Reporté après la tâche 10.** Cette vérification est infaisable ici : le front ne sait ni envoyer une image (tâche 9) ni afficher les trois états (tâche 10). Il n'existe donc aucun placeholder à regarder passer. À faire dès la tâche 10 terminée — la chaîne backend est couverte par `MediaReadyPublicationTest`, mais **rien ne prouve encore que le front consomme `message.media_ready`**.
 
 - [ ] **Step 6: Quatre portes, commit**
 

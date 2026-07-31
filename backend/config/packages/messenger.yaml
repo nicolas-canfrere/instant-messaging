@@ -63,8 +63,14 @@ when@test:
     framework:
         messenger:
             transports:
-                # `in-memory` : aucun RabbitMQ n'est necessaire en CI, et
-                # zenstruck/messenger-test peut asserter ce qui part sans
-                # le consommer.
-                media: 'in-memory://'
+                # Aucun RabbitMQ n'est necessaire en CI. `test://` plutot que
+                # `in-memory://` : c'est le DSN de zenstruck/messenger-test, le
+                # seul qui offre `->process()`. Sans lui, un test peut asserter
+                # ce qui PART vers la file, jamais ce que le worker en fait —
+                # or toute la choregraphie de `MediaWasProcessed` demarre dans
+                # `TransactionalMiddleware`, cote consommation.
+                #
+                # Il n'y consomme rien tout seul : `test://` intercepte par
+                # defaut, exactement comme `in-memory://`.
+                media: 'test://'
                 failed: 'in-memory://'
