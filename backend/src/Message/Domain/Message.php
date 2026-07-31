@@ -57,19 +57,21 @@ final class Message
                 $id,
                 $conversationId,
                 $senderId,
-                // MessageWasSent n'est PAS modifie : sa charge utile reste un
-                // `string`, sans les medias. Un message image-seule y voyage
-                // avec un contenu vide ; la charge utile media arrivera par la
-                // tache 8, dans un evenement distinct.
+                // Un message image-seule voyage avec un contenu VIDE : la
+                // charge utile reste un `string`, pas un MessageContent.
                 //
-                // Consequence visible avant la tache 8 : Conversation ecoute cet
-                // evenement pour son `last_message_preview`, et un message
-                // image-seule y ecrit donc une chaine vide — l'ecran d'accueil
-                // affiche une ligne blanche jusqu'a ce que la tache 8 y mette un
-                // apercu ("📷 Photo" ou equivalent). Pas un bug de cette tache.
+                // Consequence assumee : Conversation ecoute cet evenement pour
+                // son `last_message_preview`, et un message image-seule y ecrit
+                // donc une chaine vide — l'ecran d'accueil affiche une ligne
+                // blanche la ou un apercu ("📷 Photo") aurait sa place. Hors
+                // perimetre de T4, et sans rapport avec les medias transportes
+                // ci-dessous, qui ne servent qu'a l'affichage du fil.
                 $content?->toString() ?? '',
                 $clientMessageId->toString(),
                 $now,
+                // Dans l'ordre d'affichage : `$mediaIds` est deja la liste que
+                // le repository ecrira avec sa `position`.
+                array_map(static fn(MediaId $mediaId): string => $mediaId->toString(), $mediaIds),
             ),
         );
 

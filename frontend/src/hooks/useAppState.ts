@@ -155,15 +155,11 @@ function toStoredMessage(payload: Record<string, unknown>): StoredMessage {
     editedAt: readNullableString(payload, 'edited_at'),
     deletedAt: readNullableString(payload, 'deleted_at'),
     status: 'sent',
-    // La charge utile de `message.created` ne porte PAS les medias, et c'est
-    // volontaire : au moment ou elle part, le worker n'a rien inspecte, il n'y
-    // aurait donc ni dimensions ni URL a transmettre. Chaque image arrive
-    // ensuite par son propre `message.media_ready`.
-    //
-    // Consequence a connaitre : entre les deux, un destinataire voit la bulle
-    // avec des emplacements en attente. C'est `message.media_ready`, traite
-    // plus bas, qui les remplit un par un.
-    media: [],
+    // Les medias arrivent des la creation du message : le destinataire voit
+    // donc tout de suite les emplacements — souvent meme les images, le worker
+    // etant plus rapide que la frappe. `message.media_ready`, traite plus bas,
+    // ne sert plus qu'aux traitements lents.
+    media: toStoredMediaList(payload),
   };
 }
 
@@ -183,7 +179,32 @@ function toStoredMedia(payload: Record<string, unknown>): StoredMedia | null {
     return null;
   }
 
-  const fields = media as Record<string, unknown>;
+  return readMedia(media as Record<string, unknown>);
+}
+
+/**
+ * La liste `media` de `message.created`. Un destinataire la recoit des la
+ * creation du message : sans elle, il ignorerait jusqu'a l'EXISTENCE des
+ * images et devrait redemander la page a l'aveugle pour le decouvrir.
+ *
+ * Les entrees illisibles sont ecartees, pas remplacees par un objet vide : une
+ * bulle sans emplacement vaut mieux qu'un emplacement qui n'affichera jamais rien.
+ */
+function toStoredMediaList(payload: Record<string, unknown>): StoredMedia[] {
+  const media = payload['media'];
+
+  if (!Array.isArray(media)) {
+    return [];
+  }
+
+  return media
+    .map((item: unknown) =>
+      typeof item === 'object' && item !== null ? readMedia(item as Record<string, unknown>) : null,
+    )
+    .filter((item): item is StoredMedia => item !== null);
+}
+
+function readMedia(fields: Record<string, unknown>): StoredMedia | null {
   const id = readString(fields, 'id');
   const status = readString(fields, 'status');
 

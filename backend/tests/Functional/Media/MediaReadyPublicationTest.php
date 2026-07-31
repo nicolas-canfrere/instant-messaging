@@ -34,6 +34,8 @@ final class MediaReadyPublicationTest extends DatabaseTestCase
     private const string ORPHAN_MEDIA_ID = '01JQZ0000000000000000031AA';
     private const string REJECTED_MEDIA_ID = '01JQZ0000000000000000032AA';
 
+    private const string CREATED_MEDIA_ID = '01JQZ0000000000000000033AA';
+
     private const string CLIENT_ID = '01J9ZQ7X8K3M4N5P6Q7R8S9TC1';
 
     public function testAMediaProcessedAfterItsMessageIsPushedToTheConversation(): void
@@ -116,6 +118,36 @@ final class MediaReadyPublicationTest extends DatabaseTestCase
     }
 
     /**
+     * Le pendant de la choregraphie, et ce qui la rend rarement necessaire :
+     * `message.created` porte deja les medias. Sans cela, un destinataire
+     * ignorerait jusqu'a l'EXISTENCE des images du message qu'il vient de
+     * recevoir, et devrait redemander la page a l'aveugle pour le decouvrir.
+     */
+    public function testMessageCreatedAlreadyCarriesItsMedia(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+
+        $mediaId = $this->uploadedMedia(self::CREATED_MEDIA_ID, 'valide.jpg', MediaMimeType::Jpeg);
+        $this->sendWithMedia($conversationId, self::CLIENT_ID, $mediaId);
+
+        $created = $this->publicationsOfType('message.created');
+
+        self::assertCount(1, $created);
+
+        /** @var array{media: list<array<string, mixed>>} $payload */
+        $payload = $created[0]['payload'];
+
+        self::assertCount(1, $payload['media']);
+        self::assertSame($mediaId->toString(), $payload['media'][0]['id']);
+        // Non terminal, et aucune URL signee : c'est un EMPLACEMENT qu'on
+        // annonce, pas une image. `pending` ici parce que ce test envoie le
+        // message avant de confirmer le televersement — l'ordre est libre.
+        self::assertSame('pending', $payload['media'][0]['status']);
+        self::assertNull($payload['media'][0]['url']);
+    }
+
+    /**
      * Confirme le televersement par la vraie route, puis fait consommer la file
      * `media`. Le transport (`test://`) intercepte sans consommer : sans ce
      * `process()`, `ProcessMediaCommand` resterait en file et le worker ne
@@ -132,7 +164,13 @@ final class MediaReadyPublicationTest extends DatabaseTestCase
         $this->transport('media')->process();
     }
 
-    /** Depose les octets dans MinIO et rend le media a l'etat `processing`. */
+    /**
+     * Depose les octets dans MinIO et rend un media a l'etat `pending` : la
+     * confirmation de televersement, qui le fait passer a `processing`, est le
+     * geste de `confirmAndProcess()`. Les tests qui envoient le message AVANT
+     * de confirmer voient donc bien un `pending` — l'ordre est libre, le client
+     * n'a aucune raison d'attendre.
+     */
     private function uploadedMedia(string $mediaIdString, string $fixture, MediaMimeType $declared): MediaId
     {
         $mediaId = MediaId::fromString($mediaIdString);
@@ -181,12 +219,18 @@ final class MediaReadyPublicationTest extends DatabaseTestCase
      */
     private function mediaReadyPublications(): array
     {
+        return $this->publicationsOfType('message.media_ready');
+    }
+
+    /** @return list<array{topic: string, type: string, payload: array<string, mixed>, id: string|null}> */
+    private function publicationsOfType(string $type): array
+    {
         /** @var InMemoryEventPublisher $publisher */
         $publisher = static::getContainer()->get(InMemoryEventPublisher::class);
 
         return array_values(array_filter(
             $publisher->published(),
-            static fn(array $event): bool => 'message.media_ready' === $event['type'],
+            static fn(array $event): bool => $type === $event['type'],
         ));
     }
 }

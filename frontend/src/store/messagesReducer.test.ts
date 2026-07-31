@@ -618,7 +618,15 @@ describe('message/edited', () => {
         previewUrl: 'blob:local/2',
       };
 
-      const fresh: StoredMedia = { ...stale, status: 'ready', previewUrl: null };
+      // Un `ready` porte TOUJOURS ses URLs : le CHECK `media_ready_is_measured`
+      // l'impose en base. C'est ce qui rend l'apercu local inutile.
+      const fresh: StoredMedia = {
+        ...stale,
+        status: 'ready',
+        url: 'https://stockage.test/original?X-Amz-Signature=abc',
+        thumbnailUrl: 'https://stockage.test/thumb?X-Amz-Signature=abc',
+        previewUrl: null,
+      };
 
       const optimistic = messagesReducer(emptyMessagesState(), {
         type: 'message/optimistic',
@@ -640,6 +648,42 @@ describe('message/edited', () => {
       });
 
       expect(selectThread(after, 'c1').items[0]?.media).toEqual([fresh]);
+    });
+
+    /**
+     * Depuis que `message.created` porte les medias, l'echo arrive avec la vue
+     * SERVEUR — souvent encore `processing`, donc sans aucune URL. Recopier
+     * cette vue telle quelle remplacerait l'image de l'expediteur par un
+     * placeholder a l'instant meme ou le serveur accuse reception.
+     */
+    it('reporte l apercu local sur le media que l echo decrit', () => {
+      const preview: StoredMedia = {
+        id: '01JQZ0000000000000000072AA',
+        status: 'processing',
+        url: null,
+        thumbnailUrl: null,
+        width: null,
+        height: null,
+        previewUrl: 'blob:local/3',
+      };
+
+      const optimistic = messagesReducer(emptyMessagesState(), {
+        type: 'message/optimistic',
+        message: aMessage({ id: null, clientMessageId: 'c-envoi', content: null, media: [preview] }),
+      });
+
+      const after = messagesReducer(optimistic, {
+        type: 'message/received',
+        message: aMessage({
+          id: '01J0000000000000000000000B',
+          clientMessageId: 'c-envoi',
+          content: null,
+          // Ce que le serveur sait : le media existe, il est en traitement.
+          media: [{ ...preview, previewUrl: null }],
+        }),
+      });
+
+      expect(selectThread(after, 'c1').items[0]?.media[0]?.previewUrl).toBe('blob:local/3');
     });
   });
 });

@@ -119,9 +119,25 @@ function upsert(items: StoredMessage[], incoming: StoredMessage): StoredMessage[
       // worker n'a rien inspecte — donc la recopier telle quelle effacerait les
       // apercus locaux au moment meme ou le serveur confirme l'envoi.
       //
-      // Une liste NON vide gagne toujours : c'est le cas d'une page
-      // d'historique rechargee, ou le serveur fait autorite.
-      media: incoming.media.length > 0 ? incoming.media : (existing?.media ?? []),
+      // Une liste NON vide gagne, MAIS les apercus locaux sont reportes : le
+      // serveur ne les connait pas, et un media encore `processing` n'a aucune
+      // URL a offrir. Sans ce report, l'expediteur verrait son image remplacee
+      // par un placeholder au moment ou le serveur accuse reception.
+      media:
+        incoming.media.length > 0
+          ? incoming.media.map((media) => ({
+              ...media,
+              // Report UNIQUEMENT tant que le serveur n'a rien a servir. Des
+              // qu'il tient une URL, l'apercu local a fini son service et le
+              // garder retiendrait le fichier en memoire pour rien.
+              previewUrl:
+                media.url !== null
+                  ? null
+                  : (media.previewUrl ??
+                    existing?.media.find((local) => local.id === media.id)?.previewUrl ??
+                    null),
+            }))
+          : (existing?.media ?? []),
     };
 
     return merged.sort(compare);

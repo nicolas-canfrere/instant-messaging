@@ -4131,7 +4131,9 @@ Puis les deux navigateurs : Alice envoie, Bob voit le placeholder puis l'image, 
 >
 > Cause, vérifiée dans les logs du worker (`MessageMediaBecameReady` : 0 occurrence) : le worker termine **avant** l'envoi du message — il met ~50 ms là où l'utilisateur met plusieurs secondes à écrire. `PropagateMediaReadyListener` ne trouve donc aucun message porteur, ne publie rien, et c'est le comportement voulu (spec §3.5). Mais alors **plus rien** n'annonce l'image à Bob : `message.created` ne porte pas les médias.
 >
-> Autrement dit, la chorégraphie de la tâche 8 ne se déclenche que si le traitement est plus lent que la frappe — un cas rare. Le cas courant n'a aucun chemin. **Correctif nécessaire hors de cette tâche** : faire porter `media` à la charge utile de `message.created` (ajout additif au contrat temps réel). Deux régressions trouvées au passage et corrigées ici : l'écho SSE effaçait les aperçus de l'expéditeur, et `media/ready` ne savait pas insérer un média absent du message.
+> Autrement dit, la chorégraphie de la tâche 8 ne se déclenche que si le traitement est plus lent que la frappe — un cas rare. Le cas courant n'avait aucun chemin. Deux régressions trouvées au passage et corrigées ici : l'écho SSE effaçait les aperçus de l'expéditeur, et `media/ready` ne savait pas insérer un média absent du message.
+>
+> **Résolu depuis, hors périmètre de cette tâche** : `MessageWasSent` transporte désormais `mediaIds`, et `PublishMessageWasSentListener` fait porter `media` (les `MediaView` resignées) à la charge utile de `message.created`. Le critère est vérifié à deux navigateurs : Bob reçoit la bulle **avec son image**, sans rafraîchir. `message.media_ready` reste nécessaire pour les traitements lents, mais n'est plus le seul chemin.
 
 - [ ] **Step 6: Commit**
 
