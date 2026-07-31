@@ -35,9 +35,10 @@ export function Composer({ onSend, onTyping }: Props) {
 
   const readyMedia = uploads.pending.filter((item) => item.status === 'uploaded');
 
-  // Un message peut desormais n'etre QUE des images : du texte OU au moins une
-  // image suffit. En revanche on bloque tant qu'un transfert est en cours,
-  // plutot que de laisser partir un message ampute de l'image qui n'a pas eu le
+  // Un message peut desormais n'etre QUE des pieces jointes (images ou
+  // documents) : du texte OU au moins une piece jointe prete suffit. En
+  // revanche on bloque tant qu'un transfert est en cours, plutot que de
+  // laisser partir un message ampute de la piece jointe qui n'a pas eu le
   // temps d'arriver.
   const canSend = (trimmed !== '' || readyMedia.length > 0) && !uploads.isUploading;
 

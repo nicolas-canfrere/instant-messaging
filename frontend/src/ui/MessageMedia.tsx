@@ -16,9 +16,11 @@ type Props = {
  * web lente. Un document, lui, garde une hauteur FIXE : rien ne depend de son
  * contenu, donc rien a reserver.
  *
- * `onError`/`onExpired` recharge la page de messages. L'erreur attendue n'est
- * PAS un fichier casse : c'est une URL signee EXPIREE, dans un onglet reste
- * ouvert plus de quinze minutes. Recharger en obtient une fraiche.
+ * `onError`/`onExpired` recharge la page de messages — pour une image
+ * seulement. L'erreur attendue n'est PAS un fichier casse : c'est une URL
+ * signee EXPIREE, dans un onglet reste ouvert plus de quinze minutes.
+ * Recharger en obtient une fraiche. Un document n'a PAS ce filet : voir la
+ * note sur le lien "Telecharger" plus bas.
  *
  * ## Chez l'expediteur, l'attente n'est pas vide — pour une image seulement
  *
@@ -78,8 +80,16 @@ export function MessageMedia({ media, onExpired }: Props) {
               // `Content-Disposition: attachment`, donc le navigateur
               // telecharge sans naviguer. Un nouvel onglet s'ouvrirait et
               // se refermerait aussitot.
+              //
+              // Pas de `onError={onExpired}` ici, contrairement a l'`<img>`
+              // de la branche image plus bas : un `<a>` n'emet aucun
+              // evenement DOM `error` observable pour un telechargement qui
+              // echoue (contrairement au chargement d'une ressource `<img>`
+              // ou `<video>`). Si l'URL signee a expire, le clic se solde
+              // par un telechargement rate, sans que cette page en soit
+              // informee ni ne puisse se recharger automatiquement. Pas de
+              // recuperation ici : c'est une limite connue, pas un oubli.
               className="text-xs text-blue-600 underline"
-              onError={onExpired}
             >
               Télécharger
             </a>

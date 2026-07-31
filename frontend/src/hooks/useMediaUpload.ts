@@ -5,7 +5,7 @@ import { declaredTypeFor } from '../api/declaredType';
 import { putBytes } from '../api/upload';
 
 /**
- * Cycle complet d'un envoi de piece jointe : pré-signature → PUT direct →
+ * Cycle complet d'un envoi de piece jointe : pre-signature → PUT direct →
  * confirmation. Une image comme un document suivent exactement le meme
  * cycle ; seul l'apercu differe (voir plus bas).
  *
