@@ -101,6 +101,30 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
                 return;
             }
 
+            $declared = $media->declaredMimeType();
+
+            if ($mimeType->family() !== $declared->family()) {
+                // Familles differentes : la cle de stockage porte deja
+                // l'extension du declare, et le Content-Disposition
+                // servirait un nom qui ment. Place AVANT l'aiguillage par
+                // famille : sinon un PDF declare comme du texte produirait
+                // une miniature avant d'etre refuse.
+                $this->reject($media, MediaRejectionReason::UnsupportedType, $now, eraseBytes: true);
+
+                return;
+            }
+
+            if (!$mimeType->covers($declared)) {
+                // Meme famille, sous-type different (jpeg declare, png reel) :
+                // signal actionnable, mais pas de refus — comportement
+                // tranche 4 inchange.
+                $this->logger->warning('Le type declare du media {media_id} ne correspond pas aux octets', [
+                    'media_id' => $media->id()->toString(),
+                    'declared_mime_type' => $declared->value,
+                    'actual_mime_type' => $mimeType->value,
+                ]);
+            }
+
             if (MediaFamily::Document === $mimeType->family()) {
                 // Ni mesure ni miniature : un document n'en a pas (spec §3.3).
                 $media->markDocumentReady($mimeType, $byteSize, $now);
@@ -131,16 +155,6 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
 
             $media->markImageReady($mimeType, $dimensions->width, $dimensions->height, $byteSize, $thumbnailKey, $now);
             $this->media->save($media);
-
-            if ($mimeType !== $media->declaredMimeType()) {
-                // Signal actionnable : un client qui declare autre chose que ce
-                // qu'il envoie est un bug, ou pire.
-                $this->logger->warning('Le type declare du media {media_id} ne correspond pas aux octets', [
-                    'media_id' => $media->id()->toString(),
-                    'declared_mime_type' => $media->declaredMimeType()->value,
-                    'actual_mime_type' => $mimeType->value,
-                ]);
-            }
 
             $this->logger->info('Media {media_id} pret', [
                 'media_id' => $media->id()->toString(),

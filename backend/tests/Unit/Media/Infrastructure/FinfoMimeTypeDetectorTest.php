@@ -22,6 +22,16 @@ final class FinfoMimeTypeDetectorTest extends TestCase
         // Un SVG renomme .png : c'est le deguisement que la tranche 4 attrape
         // deja, et qui doit continuer d'etre attrape.
         yield 'svg deguise en png' => ['deguise.png', MediaRejectionReason::UnsupportedType];
+        yield 'pdf' => ['minimal.pdf', MediaMimeType::Pdf];
+        yield 'markdown' => ['notes.md', MediaMimeType::Text];
+        yield 'csv' => ['donnees.csv', MediaMimeType::Text];
+        // La garde UTF-8 le sauve : finfo le classe text/x-shellscript, mais ses
+        // octets sont du texte valide. Sans elle, un .txt banal serait rejete.
+        yield 'texte a shebang' => ['script-comme-texte.txt', MediaMimeType::Text];
+        // Un octet NUL n'est pas du texte, quoi qu'en dise libmagic.
+        yield 'texte avec octet nul' => ['avec-nul.txt', MediaRejectionReason::UnsupportedType];
+        // LE test de securite : du HTML servi en same-origin s'executerait.
+        yield 'html deguise en txt' => ['deguise.txt', MediaRejectionReason::UnsupportedType];
     }
 
     #[DataProvider('fixtures')]

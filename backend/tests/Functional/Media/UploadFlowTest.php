@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Media;
 
 use App\Media\Application\Command\ProcessMediaCommand;
+use App\Media\Application\MediaStorageInterface;
+use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaRepositoryInterface;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use App\Tests\Functional\DatabaseTestCase;
 use App\Tests\Support\MediaCommandSpy;
+use Zenstruck\Messenger\Test\InteractsWithMessenger;
 
 /**
  * `DatabaseTestCase::login()` re-authentifie le MEME client : les scenarios a
@@ -19,6 +23,10 @@ use App\Tests\Support\MediaCommandSpy;
  */
 final class UploadFlowTest extends DatabaseTestCase
 {
+    use InteractsWithMessenger;
+
+    private const string FIXTURES = __DIR__ . '/../../Fixtures/Media/';
+
     public function testPresigningReturnsAUsableUrlAndLeavesTheMediaPending(): void
     {
         $this->login('alice');
@@ -46,7 +54,10 @@ final class UploadFlowTest extends DatabaseTestCase
     {
         $this->login('alice');
 
-        $this->presignRaw('contrat.pdf', 'application/pdf', 2_048);
+        // `image/svg+xml` reste hors de l'allowlist (spec §9) : un SVG peut
+        // porter du script, l'accepter reviendrait a servir du contenu
+        // actif en same-origin.
+        $this->presignRaw('icone.svg', 'image/svg+xml', 2_048);
 
         self::assertResponseStatusCodeSame(422);
         self::assertResponseHeaderSame('Content-Type', 'application/problem+json');
@@ -149,6 +160,87 @@ final class UploadFlowTest extends DatabaseTestCase
         $this->client->request('POST', '/api/media/01JQZ0000000000000000000ZZ/uploaded');
 
         self::assertResponseStatusCodeSame(404);
+    }
+
+    public function testZipIsRefusedAtPresign(): void
+    {
+        $this->login('alice');
+
+        // 422 avec la violation nommant le champ, pas un 500 ni un message
+        // ad hoc : c'est la discipline RFC 7807 du projet. `application/zip`
+        // n'identifie pas un fichier zip, c'est le conteneur de .docx, .jar
+        // et .apk (spec §9) : ecarte explicitement de l'allowlist.
+        $this->presignRaw('archive.zip', 'application/zip', 1_024);
+
+        self::assertResponseStatusCodeSame(422);
+        /** @var array{violations: list<array{field: string, message: string}>} $body */
+        $body = $this->json();
+        self::assertSame('content_type', $body['violations'][0]['field']);
+    }
+
+    /**
+     * Bout en bout : presignature, depot des octets, confirmation,
+     * traitement par le handler, puis lecture via un message qui le porte.
+     * `notes.md` est reconnu `text/plain` par le detecteur (les octets ne
+     * distinguent pas les trois sous-types texte) : c'est le cas COUVERT par
+     * `MediaMimeType::covers()`, pas une egalite stricte.
+     */
+    public function testAMarkdownDocumentFlowsThroughAsReadyForDownload(): void
+    {
+        $this->login('alice');
+        $conversationId = $this->firstConversationId();
+
+        /** @var array{media_id: string} $ticket */
+        $ticket = $this->presignRaw('notes.md', 'text/markdown', 24);
+        self::assertResponseStatusCodeSame(201);
+
+        $mediaId = MediaId::fromString($ticket['media_id']);
+
+        // La stack de test ne leve aucun Caddy : aucune origine unique n'est
+        // joignable depuis l'interieur du conteneur `backend-test` pour un
+        // vrai PUT signe (cf. PresignedUploadSignatureTest). On depose donc
+        // les octets directement, comme MediaProcessingTest.
+        /** @var MediaStorageInterface $storage */
+        $storage = self::getContainer()->get(MediaStorageInterface::class);
+        $storage->put(
+            StorageKey::forOriginal($mediaId, MediaMimeType::Markdown),
+            self::FIXTURES . 'notes.md',
+            MediaMimeType::Markdown,
+        );
+
+        $this->client->request('POST', sprintf('/api/media/%s/uploaded', $mediaId->toString()));
+        self::assertResponseStatusCodeSame(204);
+
+        $this->transport('media')->process();
+
+        $this->client->request(
+            'POST',
+            sprintf('/api/conversations/%s/messages', $conversationId),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode(
+                ['client_message_id' => '01J9ZQ7X8K3M4N5P6Q7R8S9TC2', 'media_ids' => [$mediaId->toString()]],
+                \JSON_THROW_ON_ERROR,
+            ),
+        );
+        self::assertResponseStatusCodeSame(201);
+
+        $this->client->request('GET', sprintf('/api/conversations/%s/messages', $conversationId));
+        self::assertResponseStatusCodeSame(200);
+
+        /** @var array{items: list<array{media: list<array<string, mixed>>}>} $page */
+        $page = $this->json();
+        /** @var array{status: string, mime_type: string, width: int|null, height: int|null, url: string, thumbnail_url: string|null, filename: string} $media */
+        $media = $page['items'][0]['media'][0];
+
+        self::assertSame('ready', $media['status']);
+        // La bibliotheque n'a jamais su distinguer les trois sous-types
+        // texte : la mesure est TOUJOURS text/plain, meme pour un .md.
+        self::assertSame('text/plain', $media['mime_type']);
+        self::assertNull($media['width']);
+        self::assertNull($media['height']);
+        self::assertNull($media['thumbnail_url']);
+        self::assertStringContainsString('attachment', urldecode($media['url']));
+        self::assertSame('notes.md', $media['filename']);
     }
 
     private function presign(): string

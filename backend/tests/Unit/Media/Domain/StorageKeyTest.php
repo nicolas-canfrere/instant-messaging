@@ -22,6 +22,35 @@ final class StorageKeyTest extends TestCase
         self::assertSame('media/01JQZ0000000000000000000AB.jpg', $key->toString());
     }
 
+    public function testOriginalKeyAcceptsEachAllowlistedExtension(): void
+    {
+        self::assertSame(
+            'media/01JQZ0000000000000000000AB.txt',
+            StorageKey::forOriginal(MediaId::fromString(self::ULID), MediaMimeType::Text)->toString(),
+        );
+        self::assertSame(
+            'media/01JQZ0000000000000000000AB.csv',
+            StorageKey::forOriginal(MediaId::fromString(self::ULID), MediaMimeType::Csv)->toString(),
+        );
+        self::assertSame(
+            'media/01JQZ0000000000000000000AB.md',
+            StorageKey::forOriginal(MediaId::fromString(self::ULID), MediaMimeType::Markdown)->toString(),
+        );
+        self::assertSame(
+            'media/01JQZ0000000000000000000AB.pdf',
+            StorageKey::forOriginal(MediaId::fromString(self::ULID), MediaMimeType::Pdf)->toString(),
+        );
+    }
+
+    public function testAKeyWithAnExtensionOutsideTheAllowlistIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        // `.exe` n'a jamais fait partie de l'allowlist : la cle de stockage
+        // ne doit accepter QUE les huit extensions connues.
+        StorageKey::fromString('media/01JQZ0000000000000000000AB.exe');
+    }
+
     public function testThumbnailKeyIsDerivedFromTheSameIdentifier(): void
     {
         $key = StorageKey::forThumbnail(MediaId::fromString(self::ULID));

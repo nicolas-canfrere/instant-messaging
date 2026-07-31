@@ -21,7 +21,7 @@ final readonly class StorageKey implements \Stringable
     private const string PREFIX = 'media/';
 
     /** Prefixe, ULID, suffixe optionnel, extension. Rien d'autre ne passe. */
-    private const string PATTERN = '/\Amedia\/[0-7][0-9A-HJKMNP-TV-Z]{25}(-thumb)?\.(jpg|png|webp|gif|txt)\z/';
+    private const string PATTERN = '/\Amedia\/[0-7][0-9A-HJKMNP-TV-Z]{25}(-thumb)?\.(jpg|png|webp|gif|txt|csv|md|pdf)\z/';
 
     private function __construct(private string $value)
     {

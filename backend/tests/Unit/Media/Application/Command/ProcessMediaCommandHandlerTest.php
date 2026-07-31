@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Media\Application\Command;
 
 use App\Media\Application\Command\ProcessMediaCommand;
 use App\Media\Application\Command\ProcessMediaCommandHandler;
+use App\Media\Application\ImageDimensions;
 use App\Media\Application\ImageInspectorInterface;
 use App\Media\Application\MediaStorageInterface;
 use App\Media\Application\MimeTypeDetectorInterface;
@@ -185,7 +186,9 @@ final class ProcessMediaCommandHandlerTest extends TestCase
     public function testADocumentIsMarkedReadyWithoutMeasurementOrThumbnail(): void
     {
         $mediaId = MediaId::fromString('01JQZ000000000000000090005');
-        $media = $this->uploadedMedia($mediaId);
+        // Declare ET mesure text/plain : meme famille, meme sous-type — le
+        // cas nominal d'un document, sans desaccord a signaler.
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Text, 'notes.txt');
         $localPath = $this->temporaryFile(4_096);
 
         $storage = $this->createMock(MediaStorageInterface::class);
@@ -213,14 +216,109 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         self::assertNull($media->thumbnailKey());
     }
 
-    private function uploadedMedia(MediaId $mediaId): MediaObject
+    public function testACrossFamilyMismatchIsRejected(): void
     {
+        // Declare image/jpeg, mesure text/plain : familles differentes
+        // (Image contre Document). La cle de stockage porte deja l'extension
+        // du declare, et le Content-Disposition servirait un nom qui ment
+        // sur son contenu : contrairement a un desaccord DANS la meme
+        // famille, celui-ci est refuse plutot que seulement journalise.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090006');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Text);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedType, $media->rejectionReason());
+    }
+
+    public function testASameFamilyMismatchIsOnlyWarned(): void
+    {
+        // Declare image/jpeg, mesure image/png : meme famille, comportement
+        // tranche 4 inchange — un signal actionnable, pas un refus.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090007');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::once())->method('put');
+        $storage->expects(self::never())->method('delete');
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Png);
+
+        $inspector = $this->createStub(ImageInspectorInterface::class);
+        $inspector->method('measure')->willReturn(new ImageDimensions(800, 600));
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector, $logger);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Ready, $media->status());
+        self::assertSame(MediaMimeType::Png, $media->mimeType());
+    }
+
+    public function testACoveredSubtypeIsAcceptedSilently(): void
+    {
+        // Declare text/markdown, mesure text/plain : cas NOMINAL des trois
+        // types texte. Un warning ici remplirait le journal de bruit non
+        // actionnable, exactement ce que « warning doit etre actionnable »
+        // interdit.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090009');
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Markdown, 'notes.md');
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::never())->method('delete');
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Text);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::never())->method('warning');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector, $logger);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Ready, $media->status());
+        self::assertSame(MediaMimeType::Text, $media->mimeType());
+    }
+
+    private function uploadedMedia(
+        MediaId $mediaId,
+        MediaMimeType $declared = MediaMimeType::Jpeg,
+        string $filename = 'photo.jpg',
+    ): MediaObject {
         $media = MediaObject::request(
             $mediaId,
             UserId::fromString(self::OWNER_ID),
-            StorageKey::forOriginal($mediaId, MediaMimeType::Jpeg),
-            OriginalFilename::fromString('photo.jpg'),
-            MediaMimeType::Jpeg,
+            StorageKey::forOriginal($mediaId, $declared),
+            OriginalFilename::fromString($filename),
+            $declared,
             2_000,
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),
         );
@@ -234,6 +332,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         MediaStorageInterface $storage,
         MimeTypeDetectorInterface $detector,
         ImageInspectorInterface $inspector,
+        ?LoggerInterface $logger = null,
     ): ProcessMediaCommandHandler {
         $clock = $this->createStub(ClockInterface::class);
         $clock->method('now')->willReturn(new \DateTimeImmutable('2026-07-26T09:00:30+00:00'));
@@ -244,7 +343,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
             $detector,
             $inspector,
             $clock,
-            new NullLogger(),
+            $logger ?? new NullLogger(),
         );
     }
 
