@@ -161,4 +161,29 @@ describe('ConversationView', () => {
     expect(screen.getByText(/type non accepté/i)).toBeDefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it('le voile affiche pendant le survol ne vole pas le depot au conteneur', async () => {
+    // `DropOverlay` est monte PENDANT le survol : c'est a ce moment-la que le
+    // depot doit arriver, pas apres coup. Sans `pointer-events-none` sur son
+    // contenu, ce serait le voile qui recevrait le `drop`, pas le conteneur
+    // qui porte les handlers de `useFileDrop` — le fichier disparaitrait sans
+    // message ni piece jointe. Les deux autres tests de depot ci-dessus ne
+    // couvrent pas ce cas : ils deposent directement, sans `dragenter`
+    // prealable, donc le voile n'est jamais monte au moment du `drop`.
+    renderConversation();
+    const container = screen.getByTestId('conversation');
+
+    fireEvent.dragEnter(container, { dataTransfer: { files: [], items: [] } });
+    expect(screen.getByText('Déposez pour joindre')).toBeDefined();
+
+    fireEvent.drop(container, {
+      dataTransfer: { files: [new File(['x'], 'notes.md', { type: '' })] },
+    });
+
+    expect(await screen.findByText('notes.md')).toBeDefined();
+    // Le voile redescend au depot (voir `useFileDrop`, remise a zero du
+    // compteur) : s'il restait affiche, ce serait le signe que le `drop` n'a
+    // jamais atteint le conteneur.
+    expect(screen.queryByText('Déposez pour joindre')).toBeNull();
+  });
 });

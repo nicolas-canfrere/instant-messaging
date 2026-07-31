@@ -123,8 +123,8 @@ export function useMediaUpload() {
       if (contentType === null) {
         // Refus LOCAL : aucun appel reseau pour un fichier qu'on sait refuse
         // (par ex. un `.zip`, ou un dossier glisse qui arrive sans type).
-        // Le message precis importe peu ici : la vignette affiche deja
-        // « Echec », comme tout autre transfert rate.
+        // `reason`, pose ci-dessus, porte deja le message precis affiche par
+        // la vignette (voir Composer.tsx) : rien d'autre a faire ici.
         return;
       }
 
