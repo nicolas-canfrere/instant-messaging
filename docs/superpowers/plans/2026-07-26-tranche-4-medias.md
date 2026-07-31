@@ -4183,6 +4183,12 @@ LIMIT :limit
 
 `LIMIT` borné (500) pour qu'une première exécution sur un historique chargé ne tienne pas la base. Le handler **loggue** ce qu'il a laissé : un plafond silencieux se lirait comme « tout a été purgé ».
 
+> **Entorse à l'ADR 0001, assumée et à rouvrir.** Ce `NOT EXISTS` fait lire à `Media` la table `message_media`, que possède `Message`. CLAUDE.md est explicite : « un `SELECT` dans la table d'un contexte voisin est une violation, même si deptrac ne la voit pas » — et deptrac ne la voit effectivement pas, c'est une dépendance de schéma, pas de code.
+>
+> L'alternative propre — un contrat publié par `Message` (« parmi ces médias, lesquels sont portés ? ») — a un coût réel : `Media` dépendrait de `Message`, alors que son ignorance des messages est précisément ce qui rendra son extraction en service triviale (spec §1.1). Et elle oblige à lire d'abord *tous* les médias anciens pour les filtrer ensuite, là où le `NOT EXISTS` corrélé laisse Postgres faire le travail.
+>
+> À trancher avant l'extraction réelle de `Media` : la purge deviendrait alors une responsabilité de `Message`, qui sait ce qu'il porte. La classe porte ce raisonnement en docblock.
+
 - [ ] **Step 3: Le handler et la commande console**
 
 Pour chaque orphelin : `delete()` sur l'original et sur la miniature si elle existe, puis `DELETE FROM media_objects`. Dans cet ordre — si la suppression d'objet échoue, la ligne reste et la purge suivante réessaiera. L'inverse laisserait des octets sans référence, donc invisibles pour toujours.

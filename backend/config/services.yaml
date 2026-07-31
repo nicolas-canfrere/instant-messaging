@@ -77,6 +77,7 @@ services:
     App\Shared\Application\Bus\DomainEventDispatcherInterface: '@App\Shared\Infrastructure\Bus\DomainEventDispatcher'
     App\Media\Domain\MediaRepositoryInterface: '@App\Media\Infrastructure\Persistence\DbalMediaRepository'
     App\Media\Application\Query\UploadTicketReaderInterface: '@App\Media\Infrastructure\Persistence\DbalUploadTicketReader'
+    App\Media\Application\Query\OrphanMediaReaderInterface: '@App\Media\Infrastructure\Persistence\DbalOrphanMediaReader'
     App\Media\Application\MediaStorageInterface: '@App\Media\Infrastructure\Storage\S3MediaStorage'
     App\Media\Application\ImageInspectorInterface: '@App\Media\Infrastructure\Image\GdImageInspector'
     App\Media\Application\Contract\MediaOwnershipInterface: '@App\Media\Infrastructure\Contract\DbalMediaOwnership'

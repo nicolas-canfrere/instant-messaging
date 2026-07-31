@@ -94,4 +94,16 @@ final readonly class DbalMediaRepository implements MediaRepositoryInterface
 
         $this->collector->collect(...$media->releaseEvents());
     }
+
+    public function remove(MediaId $mediaId): void
+    {
+        // Aucun evenement : la disparition d'un media que personne ne portait
+        // n'interesse personne. Le journal de la purge suffit a en garder trace.
+        $this->connection->executeStatement(
+            <<<'SQL'
+                DELETE FROM media_objects WHERE id = :id
+                SQL,
+            ['id' => $mediaId->toString()],
+        );
+    }
 }
