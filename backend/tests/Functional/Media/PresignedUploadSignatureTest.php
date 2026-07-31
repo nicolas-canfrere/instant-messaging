@@ -108,6 +108,44 @@ final class PresignedUploadSignatureTest extends TestCase
     }
 
     /**
+     * Le VO OriginalFilename laisse passer `"` et `\` : ce sont des
+     * caracteres imprimables, pas des caracteres de controle. Seul
+     * `S3MediaStorage::contentDisposition()` les neutralise (`str_replace`)
+     * avant de les mettre dans la valeur citee de l'en-tete — sans quoi ils
+     * fermeraient la chaine et casseraient le Content-Disposition. Ce test
+     * couvre precisement ce mecanisme, au-dela de ce que le VO bloque deja.
+     */
+    public function testTheAsciiFilenameNeutralizesQuotesAndBackslashes(): void
+    {
+        $key = StorageKey::forOriginal(MediaId::fromString('01JQZ0000000000000000000AD'), MediaMimeType::Jpeg);
+        $presigned = $this->storage->presignUpload($key, MediaMimeType::Jpeg, new \DateTimeImmutable());
+
+        $http = new HttpClient(['http_errors' => false]);
+        $http->put($presigned->url, [
+            'headers' => ['Content-Type' => 'image/jpeg'],
+            'body' => 'contenu-de-test',
+        ]);
+
+        $downloadUrl = $this->storage->presignDownload(
+            $key,
+            MediaDisposition::Inline,
+            OriginalFilename::fromString('rapport "final"\\copy.pdf'),
+            new \DateTimeImmutable(),
+        );
+
+        $getResponse = $http->get($downloadUrl);
+
+        self::assertSame(200, $getResponse->getStatusCode());
+        self::assertStringContainsString(
+            'inline; filename="rapport _final__copy.pdf"',
+            $getResponse->getHeaderLine('Content-Disposition'),
+        );
+        // Ni guillemet ni antislash ne doivent survivre dans la valeur citee :
+        // l'un ou l'autre fermerait prematurement la chaine.
+        self::assertStringNotContainsString('final"copy', $getResponse->getHeaderLine('Content-Disposition'));
+    }
+
+    /**
      * `X-Amz-Expires` est une DUREE relative a l'instant reel de signature —
      * pas un instant absolu qu'on pourrait antidater via le `$now` passe a
      * `presignUpload()`. Le SDK refuse meme une duree negative avant d'avoir

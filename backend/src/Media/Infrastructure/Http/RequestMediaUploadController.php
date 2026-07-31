@@ -38,8 +38,10 @@ final readonly class RequestMediaUploadController
 
         // La contrainte Choice a deja garanti l'appartenance a l'allowlist :
         // `from` ne peut pas echouer ici, et `tryFrom` masquerait un bug.
-        // Les contraintes du payload ont deja garanti le format : `fromString`
-        // ne peut pas echouer ici, et un `try` masquerait un bug de contrainte.
+        // Le NotBlank normalise (`trim`) avant de comparer, et Length/Regex
+        // referencent exactement OriginalFilename::PATTERN/MAX_LENGTH : le
+        // payload a deja garanti le format, `fromString` ne peut pas echouer
+        // ici, et un `try` masquerait un bug de contrainte.
         $this->commands->dispatch(new RequestMediaUploadCommand(
             $mediaId,
             $securityUser->userId(),

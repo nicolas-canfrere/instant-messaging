@@ -57,6 +57,29 @@ final class UploadFlowTest extends DatabaseTestCase
         self::assertSame('content_type', $body['violations'][0]['field']);
     }
 
+    /**
+     * Regression : un nom compose UNIQUEMENT d'espaces est truthy pour PHP,
+     * donc invisible a `NotBlank` sans `normalizer: 'trim'` — et `Regex`
+     * l'autorise aussi puisque l'espace est un caractere permis par
+     * `OriginalFilename::PATTERN`. Sans le normalizer, la requete atteignait
+     * le controleur, ou `OriginalFilename::fromString()` levait une exception
+     * que le listener ne traduit pas en 422 : un 500 sur une simple entree
+     * malformee, contraire a la regle absolue de l'API.
+     */
+    public function testAWhitespaceOnlyFilenameIsRefusedWithAViolation(): void
+    {
+        $this->login('alice');
+
+        $this->presignRaw('   ', 'image/jpeg', 2_048);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertResponseHeaderSame('Content-Type', 'application/problem+json');
+        /** @var array{type: string, violations: list<array{field: string, message: string}>} $body */
+        $body = $this->json();
+        self::assertSame('/problems/validation-failed', $body['type']);
+        self::assertSame('filename', $body['violations'][0]['field']);
+    }
+
     public function testASizeAboveTheCapIsRefusedBeforeAnyTransfer(): void
     {
         $this->login('alice');
