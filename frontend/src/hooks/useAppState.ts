@@ -55,11 +55,13 @@ function fromApiMedia(media: ApiMedia): StoredMedia {
   return {
     id: media.id,
     status: media.status,
+    mimeType: media.mime_type,
     url: media.url,
     thumbnailUrl: media.thumbnail_url,
     width: media.width,
     height: media.height,
     previewUrl: null,
+    filename: media.filename,
   };
 }
 
@@ -217,11 +219,13 @@ function readMedia(fields: Record<string, unknown>): StoredMedia | null {
   return {
     id,
     status: status as StoredMedia['status'],
+    mimeType: readNullableString(fields, 'mime_type'),
     url: readNullableString(fields, 'url'),
     thumbnailUrl: readNullableString(fields, 'thumbnail_url'),
     width: readNullableNumber(fields, 'width'),
     height: readNullableNumber(fields, 'height'),
     previewUrl: null,
+    filename: readString(fields, 'filename'),
   };
 }
 
@@ -432,11 +436,16 @@ export function useAppState(me: Me): AppState {
             (item): StoredMedia => ({
               id: item.mediaId,
               status: 'processing',
+              // Inconnu a cet instant : le worker n'a pas encore inspecte les
+              // octets. Le rendu se rabat alors sur l'extension de `filename`
+              // pour savoir s'il s'agit d'un document (voir `isDocument`).
+              mimeType: null,
               url: null,
               thumbnailUrl: null,
               width: null,
               height: null,
               previewUrl: item.previewUrl,
+              filename: item.fileName,
             }),
           ),
         },

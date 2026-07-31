@@ -431,11 +431,13 @@ describe('message/edited', () => {
       return {
         id,
         status: 'processing',
+        mimeType: null,
         url: null,
         thumbnailUrl: null,
         width: null,
         height: null,
         previewUrl: `blob:local/${id}`,
+        filename: 'photo.jpg',
       };
     }
 
@@ -443,11 +445,13 @@ describe('message/edited', () => {
       return {
         id,
         status: 'ready',
+        mimeType: 'image/jpeg',
         url: `https://stockage.test/${id}?X-Amz-Signature=abc`,
         thumbnailUrl: `https://stockage.test/${id}-thumb?X-Amz-Signature=abc`,
         width: 1600,
         height: 900,
         previewUrl: null,
+        filename: 'photo.jpg',
       };
     }
 
@@ -528,11 +532,13 @@ describe('message/edited', () => {
       const rejected: StoredMedia = {
         id: MEDIA_ID,
         status: 'rejected',
+        mimeType: null,
         url: null,
         thumbnailUrl: null,
         width: null,
         height: null,
         previewUrl: null,
+        filename: 'photo.jpg',
       };
 
       const after = messagesReducer(threadWithTwoMedia(), {
@@ -578,11 +584,13 @@ describe('message/edited', () => {
       const preview: StoredMedia = {
         id: '01JQZ0000000000000000070AA',
         status: 'processing',
+        mimeType: null,
         url: null,
         thumbnailUrl: null,
         width: null,
         height: null,
         previewUrl: 'blob:local/1',
+        filename: 'photo.jpg',
       };
 
       const optimistic = messagesReducer(emptyMessagesState(), {
@@ -611,11 +619,13 @@ describe('message/edited', () => {
       const stale: StoredMedia = {
         id: '01JQZ0000000000000000071AA',
         status: 'processing',
+        mimeType: null,
         url: null,
         thumbnailUrl: null,
         width: null,
         height: null,
         previewUrl: 'blob:local/2',
+        filename: 'photo.jpg',
       };
 
       // Un `ready` porte TOUJOURS ses URLs : le CHECK `media_ready_is_measured`
@@ -660,11 +670,13 @@ describe('message/edited', () => {
       const preview: StoredMedia = {
         id: '01JQZ0000000000000000072AA',
         status: 'processing',
+        mimeType: null,
         url: null,
         thumbnailUrl: null,
         width: null,
         height: null,
         previewUrl: 'blob:local/3',
+        filename: 'photo.jpg',
       };
 
       const optimistic = messagesReducer(emptyMessagesState(), {

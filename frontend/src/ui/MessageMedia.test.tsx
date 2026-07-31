@@ -9,13 +9,38 @@ function media(overrides: Partial<StoredMedia> = {}): StoredMedia {
   return {
     id: MEDIA_ID,
     status: 'processing',
+    // `null` : c'est l'etat normal tant que le worker n'a pas tranche. Les
+    // tests d'image ci-dessous n'en ont pas besoin, `isDocument` se rabattant
+    // sur l'extension de `filename`, qui reste une image par defaut.
+    mimeType: null,
     url: null,
     thumbnailUrl: null,
     width: null,
     height: null,
     previewUrl: null,
+    filename: 'photo.jpg',
     ...overrides,
   };
+}
+
+/** Un document PDF pret, avec son lien de telechargement. */
+function documentReady(overrides: Partial<StoredMedia> = {}): StoredMedia {
+  return media({
+    status: 'ready',
+    mimeType: 'application/pdf',
+    url: 'https://stockage.test/rapport.pdf?X-Amz-Signature=abc',
+    filename: 'rapport.pdf',
+    ...overrides,
+  });
+}
+
+/** Un document encore en cours d'inspection par le worker. */
+function documentProcessing(overrides: Partial<StoredMedia> = {}): StoredMedia {
+  return media({
+    status: 'processing',
+    filename: 'rapport.pdf',
+    ...overrides,
+  });
 }
 
 describe('MessageMedia', () => {
@@ -103,5 +128,33 @@ describe('MessageMedia', () => {
 
     const placeholder = container.querySelector<HTMLElement>('[style]');
     expect(placeholder?.style.height).toBe('9rem');
+  });
+
+  it('affiche une piece jointe nommee pour un document pret, pas une image', () => {
+    render(<MessageMedia media={documentReady({ filename: 'rapport.pdf' })} onExpired={() => {}} />);
+
+    expect(screen.getByText('rapport.pdf')).not.toBeNull();
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
+  it("garde la meme hauteur entre l'attente et l'affichage d'un document", () => {
+    // Pas de saut de mise en page a traiter : contrairement a une image, la
+    // hauteur d'une piece jointe ne depend pas de son contenu.
+    const { container: waiting } = render(
+      <MessageMedia media={documentProcessing()} onExpired={() => {}} />,
+    );
+    const { container: ready } = render(<MessageMedia media={documentReady()} onExpired={() => {}} />);
+
+    expect(waiting.firstElementChild?.className).toContain('h-14');
+    expect(ready.firstElementChild?.className).toContain('h-14');
+  });
+
+  it("n'affiche aucun apercu local pour un document en cours", () => {
+    // L'expediteur d'un PDF voit la meme chose que les autres : il n'y a rien
+    // a previsualiser. C'est la difference avec le cas image.
+    render(<MessageMedia media={documentProcessing()} onExpired={() => {}} />);
+
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.getByText(/en cours/i)).not.toBeNull();
   });
 });

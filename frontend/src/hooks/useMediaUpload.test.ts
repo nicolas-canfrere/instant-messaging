@@ -48,6 +48,15 @@ function anImage(name = 'chat.jpg'): File {
   return new File(['des-octets'], name, { type: 'image/jpeg' });
 }
 
+/** `type` volontairement vide : c'est le cas frequent d'un `.md`, voir declaredType.ts. */
+function aDocument(name = 'notes.md'): File {
+  return new File(['# titre'], name, { type: '' });
+}
+
+function aRefusedFile(name = 'archive.zip'): File {
+  return new File(['PK'], name, { type: 'application/zip' });
+}
+
 describe('useMediaUpload', () => {
   let urls: ReturnType<typeof stubObjectUrls>;
 
@@ -90,7 +99,11 @@ describe('useMediaUpload', () => {
 
     // Les trois etapes, dans l'ordre : reserver, televerser, confirmer.
     expect(api.presignUpload).toHaveBeenCalledWith('chat.jpg', 'image/jpeg', 10);
-    expect(putBytes).toHaveBeenCalledWith('https://stockage.test/signe', expect.any(File));
+    expect(putBytes).toHaveBeenCalledWith(
+      'https://stockage.test/signe',
+      expect.any(File),
+      'image/jpeg',
+    );
     expect(api.confirmUpload).toHaveBeenCalledWith(MEDIA_ID);
 
     const taken = result.current.takeUploaded();
@@ -175,5 +188,53 @@ describe('useMediaUpload', () => {
     unmount();
 
     expect(urls.revoke).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Le point du test : un document n'a rien a previsualiser (voir l'en-tete
+   * du fichier). Creer une `blob:` URL pour un PDF serait une URL valide que
+   * rien n'affiche, et retiendrait les octets en memoire pour rien.
+   */
+  it("n'attache aucun apercu local a un document, et le declare avec le type deduit de son extension", async () => {
+    const { result } = renderHook(() => useMediaUpload());
+
+    await act(async () => {
+      await result.current.add(aDocument('notes.md'));
+    });
+
+    expect(urls.create).not.toHaveBeenCalled();
+    expect(first(result.current.pending).previewUrl).toBeNull();
+
+    await waitFor(() => expect(first(result.current.pending).status).toBe('uploaded'));
+
+    // `.md` n'a souvent aucune entree dans la base MIME du systeme : le hook
+    // doit se fier a declaredTypeFor(), pas a `file.type` (vide ici).
+    expect(api.presignUpload).toHaveBeenCalledWith('notes.md', 'text/markdown', expect.any(Number));
+    expect(putBytes).toHaveBeenCalledWith(
+      'https://stockage.test/signe',
+      expect.any(File),
+      'text/markdown',
+    );
+  });
+
+  /**
+   * Un fichier hors de l'allowlist (par ex. un `.zip`) est refuse SANS le
+   * moindre aller-retour reseau : inutile d'attendre un 422 pour un fichier
+   * dont on connait deja l'issue.
+   */
+  it('refuse localement un type hors allowlist, sans appel reseau', async () => {
+    const { result } = renderHook(() => useMediaUpload());
+
+    await act(async () => {
+      await result.current.add(aRefusedFile());
+    });
+
+    expect(first(result.current.pending).status).toBe('failed');
+    expect(api.presignUpload).not.toHaveBeenCalled();
+    expect(putBytes).not.toHaveBeenCalled();
+    expect(api.confirmUpload).not.toHaveBeenCalled();
+
+    // Rien n'a jamais ete televerse : rien a proposer au message.
+    expect(result.current.takeUploaded()).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 import { useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { ACCEPT_ATTRIBUTE } from '../api/declaredType';
 import { useMediaUpload, type TakenMedia } from '../hooks/useMediaUpload';
 
 type Props = {
@@ -85,13 +86,28 @@ export function Composer({ onSend, onTyping }: Props) {
         <ul className="mb-3 flex flex-wrap gap-2">
           {uploads.pending.map((item) => (
             <li key={item.localId} className="relative">
-              <img
-                src={item.previewUrl}
-                alt={item.fileName}
-                className={`h-20 w-20 rounded border border-slate-300 object-cover ${
-                  item.status === 'uploaded' ? '' : 'opacity-50'
-                }`}
-              />
+              {item.previewUrl !== null ? (
+                <img
+                  src={item.previewUrl}
+                  alt={item.fileName}
+                  className={`h-20 w-20 rounded border border-slate-300 object-cover ${
+                    item.status === 'uploaded' ? '' : 'opacity-50'
+                  }`}
+                />
+              ) : (
+                // Un document n'a pas d'apercu visuel (voir useMediaUpload) :
+                // on montre son nom a la place d'une vignette qui n'existerait pas.
+                <div
+                  className={`flex h-20 w-20 flex-col items-center justify-center gap-1 rounded border border-slate-300 bg-slate-50 px-1 text-center ${
+                    item.status === 'uploaded' ? '' : 'opacity-50'
+                  }`}
+                >
+                  <span aria-hidden="true" className="text-lg">
+                    📄
+                  </span>
+                  <span className="w-full truncate text-[10px] text-slate-700">{item.fileName}</span>
+                </div>
+              )}
 
               {item.status === 'uploading' && (
                 <span className="absolute inset-0 flex items-center justify-center text-xs text-slate-700">
@@ -122,11 +138,13 @@ export function Composer({ onSend, onTyping }: Props) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          // Commodite du selecteur seulement : ce n'est pas une validation,
+          // declaredTypeFor() reste la porte reelle (voir useMediaUpload).
+          accept={ACCEPT_ATTRIBUTE}
           multiple
           onChange={handleFiles}
           className="hidden"
-          aria-label="Ajouter des images"
+          aria-label="Ajouter des fichiers"
         />
 
         <button
@@ -134,7 +152,7 @@ export function Composer({ onSend, onTyping }: Props) {
           onClick={() => fileInputRef.current?.click()}
           className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
         >
-          Image
+          Fichier
         </button>
 
         <textarea
