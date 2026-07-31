@@ -56,10 +56,13 @@ type Props = {
 };
 
 /**
- * Ce composant est monte avec `key={conversationId}` par `ConversationView` :
- * changer de conversation le REMONTE. C'est volontaire, et c'est ce qui remet
- * a zero la hauteur memorisee par `useScrollAnchor` — sinon la hauteur d'un
- * fil servirait d'ancre a un autre et le scroll sauterait au changement.
+ * Ce composant est remonte a chaque changement de conversation : c'est
+ * `ConversationView` qui porte `key={conversation.id}` sur `ConversationBody`,
+ * le composant qui rend ce `MessageList` — pas un `key` pose ici. Changer de
+ * conversation remonte donc tout `ConversationBody`, ce composant compris.
+ * C'est volontaire, et c'est ce qui remet a zero la hauteur memorisee par
+ * `useScrollAnchor` — sinon la hauteur d'un fil servirait d'ancre a un autre
+ * et le scroll sauterait au changement.
  */
 export function MessageList({
   thread,

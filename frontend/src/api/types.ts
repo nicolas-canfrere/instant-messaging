@@ -27,17 +27,26 @@ export type ConversationDetail = {
 };
 
 /**
- * Une image portee par un message, telle que le serveur la decrit.
+ * Une piece jointe portee par un message, telle que le serveur la decrit —
+ * image ou document.
  *
- * Tout est nullable sauf `id` et `status`, et ce n'est pas de la prudence : le
- * serveur ne signe une URL que pour un media `ready`. Tant que le worker n'a
- * pas valide les octets, il n'y a NI dimensions NI URL — on ne donne pas acces
- * a des octets dont personne n'a encore verifie que ce sont bien des images.
+ * Tout est nullable sauf `id`, `status` et `filename`, et ce n'est pas de la
+ * prudence : le serveur ne signe une URL que pour un media `ready`. Tant que
+ * le worker n'a pas valide les octets, il n'y a NI dimensions NI URL — on ne
+ * donne pas acces a des octets dont personne n'a encore verifie la nature.
+ * `filename` echappe a cette regle : c'est le nom que l'utilisateur a choisi,
+ * connu des la pre-signature, jamais mesure dans les octets.
+ *
+ * `ready` ne veut plus dire « miniature disponible » : cela veut dire
+ * « valide ». Une image a une miniature ; un document n'en a jamais —
+ * `thumbnail_url`, `width` et `height` y restent nuls, meme `ready`. C'est
+ * `mime_type` (ou a defaut l'extension de `filename`) qui distingue les deux
+ * cote affichage.
  *
  * Les quatre etats se lisent comme une progression :
  *  - `pending`    : pre-signe, le navigateur n'a encore rien televerse ;
  *  - `processing` : les octets sont arrives, le worker n'a pas tranche ;
- *  - `ready`      : valide, mesure, miniature disponible ;
+ *  - `ready`      : valide ; miniature disponible pour une image seulement ;
  *  - `rejected`   : refuse (mauvais type, trop gros, illisible).
  */
 export type ApiMedia = {
@@ -48,6 +57,7 @@ export type ApiMedia = {
   height: number | null;
   url: string | null;
   thumbnail_url: string | null;
+  filename: string;
 };
 
 export type ApiMessage = {

@@ -4,15 +4,12 @@ declare(strict_types=1);
 
 namespace App\Media\Application;
 
-use App\Media\Domain\MediaMimeType;
-
-final readonly class InspectedImage
+/** Ce que seule une image possede. Un document n'en a jamais. */
+final readonly class ImageDimensions
 {
     public function __construct(
-        public MediaMimeType $mimeType,
         public int $width,
         public int $height,
-        public int $byteSize,
     ) {
     }
 }

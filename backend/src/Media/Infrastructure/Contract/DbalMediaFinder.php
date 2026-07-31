@@ -7,7 +7,11 @@ namespace App\Media\Infrastructure\Contract;
 use App\Media\Application\Contract\MediaFinderInterface;
 use App\Media\Application\Contract\MediaView;
 use App\Media\Application\MediaStorageInterface;
+use App\Media\Domain\MediaDisposition;
+use App\Media\Domain\MediaFamily;
+use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use Doctrine\DBAL\ArrayParameterType;
@@ -37,10 +41,10 @@ final readonly class DbalMediaFinder implements MediaFinderInterface
             return [];
         }
 
-        /** @var list<array{id: string, status: string, storage_key: string, thumbnail_key: string|null, mime_type: string|null, width: int|null, height: int|null}> $rows */
+        /** @var list<array{id: string, status: string, storage_key: string, thumbnail_key: string|null, mime_type: string|null, width: int|null, height: int|null, original_filename: string}> $rows */
         $rows = $this->connection->fetchAllAssociative(
             <<<'SQL'
-                SELECT id, status, storage_key, thumbnail_key, mime_type, width, height
+                SELECT id, status, storage_key, thumbnail_key, mime_type, width, height, original_filename
                 FROM media_objects
                 WHERE id IN (:ids)
                 SQL,
@@ -58,27 +62,41 @@ final readonly class DbalMediaFinder implements MediaFinderInterface
 
             // On ne signe QUE le terminal reussi. Une URL vers un `processing`
             // pointerait des octets dont personne n'a encore verifie qu'ils
-            // sont une image (spec §4.3) ; vers un `rejected`, elle donnerait
-            // acces a ce qu'on vient precisement de refuser.
+            // sont un media servable (spec §4.3) ; vers un `rejected`, elle
+            // donnerait acces a ce qu'on vient precisement de refuser.
             //
-            // Le CHECK `media_ready_is_measured` garantit que les mesures et la
-            // miniature d'une ligne `ready` sont toutes renseignees. La
-            // miniature sert donc de temoin unique de « servable » : c'est elle
-            // qui porte la seule valeur dont l'absence casserait la signature.
-            $thumbnailKey = MediaStatus::Ready === $status ? $row['thumbnail_key'] : null;
+            // La miniature ne peut plus servir de temoin : un document pret
+            // n'en a pas. C'est le statut qui tranche, et le CHECK
+            // `media_ready_is_measured` garantit qu'une ligne `ready` porte
+            // tout ce que sa famille exige.
+            $isServable = MediaStatus::Ready === $status;
+            $mimeType = null === $row['mime_type'] ? null : MediaMimeType::from($row['mime_type']);
+            $filename = OriginalFilename::fromString($row['original_filename']);
+
+            // Un document se telecharge, une image s'affiche : c'est la
+            // famille du type constate qui decide, pas le statut.
+            $disposition = MediaFamily::Document === $mimeType?->family()
+                ? MediaDisposition::Attachment
+                : MediaDisposition::Inline;
 
             $views[$row['id']] = new MediaView(
                 $row['id'],
                 $status->value,
-                null === $thumbnailKey ? null : $row['mime_type'],
-                null === $thumbnailKey ? null : $row['width'],
-                null === $thumbnailKey ? null : $row['height'],
-                null === $thumbnailKey
-                    ? null
-                    : $this->storage->presignDownload(StorageKey::fromString($row['storage_key']), $now),
-                null === $thumbnailKey
-                    ? null
-                    : $this->storage->presignDownload(StorageKey::fromString($thumbnailKey), $now),
+                $isServable ? $row['mime_type'] : null,
+                $isServable ? $row['width'] : null,
+                $isServable ? $row['height'] : null,
+                $isServable
+                    // Avec nom : l'image s'affiche toujours dans <img>, mais
+                    // « Enregistrer sous… » propose enfin le vrai nom.
+                    ? $this->storage->presignDownload(StorageKey::fromString($row['storage_key']), $disposition, $filename, $now)
+                    : null,
+                // Reste conditionne a la miniature ELLE-MEME : elle est nulle
+                // pour tout document, et le front s'en sert pour choisir son
+                // rendu.
+                $isServable && null !== $row['thumbnail_key']
+                    ? $this->storage->presignDownload(StorageKey::fromString($row['thumbnail_key']), MediaDisposition::Inline, null, $now)
+                    : null,
+                $filename->toString(),
             );
         }
 

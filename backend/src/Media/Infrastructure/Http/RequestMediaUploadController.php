@@ -7,6 +7,7 @@ namespace App\Media\Infrastructure\Http;
 use App\Media\Application\Command\RequestMediaUploadCommand;
 use App\Media\Application\Query\GetUploadTicketQuery;
 use App\Media\Domain\MediaMimeType;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Infrastructure\Http\Payload\PresignUploadPayload;
 use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\IdGeneratorInterface;
@@ -37,9 +38,14 @@ final readonly class RequestMediaUploadController
 
         // La contrainte Choice a deja garanti l'appartenance a l'allowlist :
         // `from` ne peut pas echouer ici, et `tryFrom` masquerait un bug.
+        // Le NotBlank normalise (`trim`) avant de comparer, et Length/Regex
+        // referencent exactement OriginalFilename::PATTERN/MAX_LENGTH : le
+        // payload a deja garanti le format, `fromString` ne peut pas echouer
+        // ici, et un `try` masquerait un bug de contrainte.
         $this->commands->dispatch(new RequestMediaUploadCommand(
             $mediaId,
             $securityUser->userId(),
+            OriginalFilename::fromString($payload->filename),
             MediaMimeType::from($payload->contentType),
             $payload->size,
         ));

@@ -1,11 +1,19 @@
 import { useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
-import { useMediaUpload, type TakenMedia } from '../hooks/useMediaUpload';
+import { ACCEPT_ATTRIBUTE } from '../api/declaredType';
+import type { MediaUploadState, TakenMedia } from '../hooks/useMediaUpload';
 
 type Props = {
   /** Rend la promesse de l'envoi, mais le composant ne l'attend pas : voir `submit`. */
   onSend: (content: string, media: TakenMedia[]) => Promise<void>;
   /** Signale la frappe. L'etranglement vit dans `useTyping`, pas ici : ce composant reste bete. */
   onTyping: () => void;
+  /**
+   * Instancie par `ConversationView`, pas ici : le glisser-depose sur toute
+   * la conversation (voir `useFileDrop` dans `ConversationView`) doit
+   * ajouter au MEME etat que le selecteur de fichiers ci-dessous, sans quoi
+   * les deux chemins d'ajout divergeraient.
+   */
+  uploads: MediaUploadState;
 };
 
 /**
@@ -18,9 +26,8 @@ type Props = {
  * declenche par `onSend`. Toute sa mecanique reste malgre tout hors du
  * composant, dans `useMediaUpload` — ici on n'affiche que ce qu'il rend.
  */
-export function Composer({ onSend, onTyping }: Props) {
+export function Composer({ onSend, onTyping, uploads }: Props) {
   const [content, setContent] = useState('');
-  const uploads = useMediaUpload();
 
   // Reference sur l'`<input type="file">` pour deux raisons : le declencher
   // depuis un vrai bouton (l'input natif est masque, son rendu par defaut
@@ -34,9 +41,10 @@ export function Composer({ onSend, onTyping }: Props) {
 
   const readyMedia = uploads.pending.filter((item) => item.status === 'uploaded');
 
-  // Un message peut desormais n'etre QUE des images : du texte OU au moins une
-  // image suffit. En revanche on bloque tant qu'un transfert est en cours,
-  // plutot que de laisser partir un message ampute de l'image qui n'a pas eu le
+  // Un message peut desormais n'etre QUE des pieces jointes (images ou
+  // documents) : du texte OU au moins une piece jointe prete suffit. En
+  // revanche on bloque tant qu'un transfert est en cours, plutot que de
+  // laisser partir un message ampute de la piece jointe qui n'a pas eu le
   // temps d'arriver.
   const canSend = (trimmed !== '' || readyMedia.length > 0) && !uploads.isUploading;
 
@@ -85,13 +93,28 @@ export function Composer({ onSend, onTyping }: Props) {
         <ul className="mb-3 flex flex-wrap gap-2">
           {uploads.pending.map((item) => (
             <li key={item.localId} className="relative">
-              <img
-                src={item.previewUrl}
-                alt={item.fileName}
-                className={`h-20 w-20 rounded border border-slate-300 object-cover ${
-                  item.status === 'uploaded' ? '' : 'opacity-50'
-                }`}
-              />
+              {item.previewUrl !== null ? (
+                <img
+                  src={item.previewUrl}
+                  alt={item.fileName}
+                  className={`h-20 w-20 rounded border border-slate-300 object-cover ${
+                    item.status === 'uploaded' ? '' : 'opacity-50'
+                  }`}
+                />
+              ) : (
+                // Un document n'a pas d'apercu visuel (voir useMediaUpload) :
+                // on montre son nom a la place d'une vignette qui n'existerait pas.
+                <div
+                  className={`flex h-20 w-20 flex-col items-center justify-center gap-1 rounded border border-slate-300 bg-slate-50 px-1 text-center ${
+                    item.status === 'uploaded' ? '' : 'opacity-50'
+                  }`}
+                >
+                  <span aria-hidden="true" className="text-lg">
+                    📄
+                  </span>
+                  <span className="w-full truncate text-[10px] text-slate-700">{item.fileName}</span>
+                </div>
+              )}
 
               {item.status === 'uploading' && (
                 <span className="absolute inset-0 flex items-center justify-center text-xs text-slate-700">
@@ -100,8 +123,11 @@ export function Composer({ onSend, onTyping }: Props) {
               )}
 
               {item.status === 'failed' && (
-                <span className="absolute inset-0 flex items-center justify-center rounded bg-red-50/80 text-xs text-red-700">
-                  Échec
+                <span className="absolute inset-0 flex items-center justify-center rounded bg-red-50/80 p-1 text-center text-[10px] text-red-700">
+                  {/* `reason` n'est renseigne que pour un refus LOCAL de type
+                      (voir useMediaUpload) : un echec reseau reste sur ce
+                      texte generique, qui ne pretend pas connaitre la cause. */}
+                  {item.reason ?? 'Échec'}
                 </span>
               )}
 
@@ -122,11 +148,13 @@ export function Composer({ onSend, onTyping }: Props) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          // Commodite du selecteur seulement : ce n'est pas une validation,
+          // declaredTypeFor() reste la porte reelle (voir useMediaUpload).
+          accept={ACCEPT_ATTRIBUTE}
           multiple
           onChange={handleFiles}
           className="hidden"
-          aria-label="Ajouter des images"
+          aria-label="Ajouter des fichiers"
         />
 
         <button
@@ -134,7 +162,7 @@ export function Composer({ onSend, onTyping }: Props) {
           onClick={() => fileInputRef.current?.click()}
           className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
         >
-          Image
+          Fichier
         </button>
 
         <textarea

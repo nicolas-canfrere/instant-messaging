@@ -16,12 +16,14 @@
  * photo de 8 Mo va du navigateur au stockage en une requête, sans occuper un
  * process PHP pendant tout le transfert.
  */
-export async function putBytes(uploadUrl: string, file: File): Promise<void> {
+export async function putBytes(uploadUrl: string, file: File, contentType: string): Promise<void> {
   const response = await fetch(uploadUrl, {
     method: 'PUT',
     credentials: 'omit',
-    // Doit être EXACTEMENT le type déclaré à la pré-signature.
-    headers: { 'Content-Type': file.type },
+    // Doit etre EXACTEMENT le type declare a la pre-signature — et ce n'est
+    // plus `file.type` : voir declaredTypeFor(). Envoyer autre chose donne
+    // `SignatureDoesNotMatch`, une erreur S3 opaque.
+    headers: { 'Content-Type': contentType },
     body: file,
   });
 

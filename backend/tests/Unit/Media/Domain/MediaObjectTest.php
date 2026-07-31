@@ -9,6 +9,7 @@ use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Event\MediaWasProcessed;
 use App\Shared\Domain\Identifier\MediaId;
@@ -47,7 +48,7 @@ final class MediaObjectTest extends TestCase
     {
         $media = $this->request();
         $media->markUploaded($this->at('2026-07-26T10:00:00+00:00'));
-        $media->markReady(
+        $media->markImageReady(
             MediaMimeType::Jpeg,
             1600,
             900,
@@ -71,7 +72,7 @@ final class MediaObjectTest extends TestCase
         $media = $this->request();
         $media->markUploaded($this->at('2026-07-26T10:00:00+00:00'));
 
-        $media->markReady(
+        $media->markImageReady(
             MediaMimeType::Png,
             1600,
             900,
@@ -120,7 +121,7 @@ final class MediaObjectTest extends TestCase
     {
         $media = $this->request();
         $media->markUploaded($this->at('2026-07-26T10:00:00+00:00'));
-        $media->markReady(
+        $media->markImageReady(
             MediaMimeType::Jpeg,
             10,
             10,
@@ -134,12 +135,72 @@ final class MediaObjectTest extends TestCase
         $media->markRejected(MediaRejectionReason::TooLarge, $this->at('2026-07-26T10:00:10+00:00'));
     }
 
+    public function testADocumentBecomesReadyWithoutDimensionsOrThumbnail(): void
+    {
+        $media = $this->request();
+        $media->markUploaded($this->at('2026-07-26T10:00:00+00:00'));
+
+        $media->markDocumentReady(MediaMimeType::Text, 4_096, $this->at('2026-07-26T10:00:05+00:00'));
+
+        self::assertSame(MediaStatus::Ready, $media->status());
+        self::assertSame(4_096, $media->byteSize());
+        self::assertNull($media->width());
+        self::assertNull($media->height());
+        self::assertNull($media->thumbnailKey());
+    }
+
+    public function testADocumentAnnouncesItselfLikeAnImageDoes(): void
+    {
+        // Sans cet evenement, un message porteur resterait « en cours… » pour
+        // toujours. C'est la meme raison que pour markRejected().
+        $media = $this->request();
+        $media->markUploaded($this->at('2026-07-26T10:00:00+00:00'));
+
+        $media->markDocumentReady(MediaMimeType::Text, 4_096, $this->at('2026-07-26T10:00:05+00:00'));
+
+        $events = $media->releaseEvents();
+        self::assertCount(1, $events);
+        self::assertInstanceOf(MediaWasProcessed::class, $events[0]);
+        self::assertNull($events[0]->width);
+        self::assertNull($events[0]->height);
+    }
+
+    public function testAnImageCannotBeMarkedReadyAsADocument(): void
+    {
+        // Une transition ne se laisse pas appeler a contresens : c'est ce qui
+        // rend les deux methodes meilleures qu'un markReady() a nullables.
+        $media = $this->request();
+        $media->markUploaded($this->at('2026-07-26T10:00:00+00:00'));
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $media->markDocumentReady(MediaMimeType::Png, 4_096, $this->at('2026-07-26T10:00:05+00:00'));
+    }
+
+    public function testADocumentCannotBeMarkedReadyAsAnImage(): void
+    {
+        $media = $this->request();
+        $media->markUploaded($this->at('2026-07-26T10:00:00+00:00'));
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $media->markImageReady(
+            MediaMimeType::Text,
+            10,
+            10,
+            4_096,
+            StorageKey::forThumbnail(MediaId::fromString(self::MEDIA_ID)),
+            $this->at('2026-07-26T10:00:05+00:00'),
+        );
+    }
+
     public function testReconstituteRecordsNothing(): void
     {
         $media = MediaObject::reconstitute(
             MediaId::fromString(self::MEDIA_ID),
             UserId::fromString(self::OWNER_ID),
             StorageKey::forOriginal(MediaId::fromString(self::MEDIA_ID), MediaMimeType::Jpeg),
+            OriginalFilename::fromString('photo.jpg'),
             StorageKey::forThumbnail(MediaId::fromString(self::MEDIA_ID)),
             MediaStatus::Ready,
             MediaMimeType::Jpeg,
@@ -166,6 +227,7 @@ final class MediaObjectTest extends TestCase
             $mediaId,
             UserId::fromString(self::OWNER_ID),
             StorageKey::forOriginal($mediaId, MediaMimeType::Jpeg),
+            OriginalFilename::fromString('photo.jpg'),
             MediaMimeType::Jpeg,
             2_000,
             $this->at('2026-07-26T09:59:00+00:00'),

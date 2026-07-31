@@ -9,6 +9,7 @@ use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
 use App\Media\Domain\MediaRepositoryInterface;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\UserId;
@@ -33,6 +34,7 @@ final class MediaRepositoryTest extends KernelTestCase
             $mediaId,
             $ownerId,
             StorageKey::forOriginal($mediaId, MediaMimeType::Jpeg),
+            OriginalFilename::fromString('photo.jpg'),
             MediaMimeType::Jpeg,
             2_000,
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),
@@ -60,8 +62,8 @@ final class MediaRepositoryTest extends KernelTestCase
         // l'enfreindre en silence.
         $connection->executeStatement(
             <<<'SQL'
-                INSERT INTO media_objects (id, owner_id, storage_key, status, declared_mime_type, declared_size, created_at)
-                VALUES (:id, :owner_id, :storage_key, 'ready', 'image/jpeg', 2000, NOW())
+                INSERT INTO media_objects (id, owner_id, storage_key, original_filename, status, declared_mime_type, declared_size, created_at)
+                VALUES (:id, :owner_id, :storage_key, 'photo.jpg', 'ready', 'image/jpeg', 2000, NOW())
                 SQL,
             [
                 'id' => '01JQZ0000000000000000000CD',
@@ -85,6 +87,7 @@ final class MediaRepositoryTest extends KernelTestCase
             $mediaId,
             $this->anyUserId($connection),
             StorageKey::forOriginal($mediaId, MediaMimeType::Png),
+            OriginalFilename::fromString('photo.png'),
             MediaMimeType::Png,
             2_000,
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),

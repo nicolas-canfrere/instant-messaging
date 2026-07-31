@@ -6,14 +6,16 @@ namespace App\Tests\Unit\Media\Application\Command;
 
 use App\Media\Application\Command\ProcessMediaCommand;
 use App\Media\Application\Command\ProcessMediaCommandHandler;
+use App\Media\Application\ImageDimensions;
 use App\Media\Application\ImageInspectorInterface;
-use App\Media\Application\InspectedImage;
 use App\Media\Application\MediaStorageInterface;
+use App\Media\Application\MimeTypeDetectorInterface;
 use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
 use App\Media\Domain\MediaRepositoryInterface;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use App\Shared\Domain\Identifier\UserId;
@@ -21,6 +23,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
+use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
 
 /**
@@ -39,7 +42,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
     {
         $mediaId = MediaId::fromString('01JQZ000000000000000090001');
         $media = $this->uploadedMedia($mediaId);
-        $localPath = $this->temporaryFile();
+        $localPath = $this->temporaryFile(MediaObject::MAX_BYTES + 1);
 
         $storage = $this->createMock(MediaStorageInterface::class);
         $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
@@ -48,12 +51,10 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         $storage->expects(self::never())->method('put');
         $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
 
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
         $inspector = $this->createStub(ImageInspectorInterface::class);
-        $inspector->method('inspect')->willReturn(
-            new InspectedImage(MediaMimeType::Jpeg, 4000, 3000, MediaObject::MAX_BYTES + 1),
-        );
 
-        $handler = $this->handler($media, $storage, $inspector);
+        $handler = $this->handler($media, $storage, $detector, $inspector);
 
         $handler(new ProcessMediaCommand($mediaId));
 
@@ -61,11 +62,83 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         self::assertSame(MediaRejectionReason::TooLarge, $media->rejectionReason());
     }
 
+    public function testAnOversizedFileIsRejectedWithoutEvenDetectingItsType(): void
+    {
+        // L'ordre compte : detecter d'abord ferait lire un fichier
+        // arbitrairement gros. Le detecteur ne doit PAS etre appele.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090003');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = $this->temporaryFile(MediaObject::MAX_BYTES + 1);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = new class implements MimeTypeDetectorInterface {
+            private int $calls = 0;
+
+            public function detect(string $localPath): MediaMimeType
+            {
+                ++$this->calls;
+
+                return MediaMimeType::Jpeg;
+            }
+
+            public function detectCallCount(): int
+            {
+                return $this->calls;
+            }
+        };
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaRejectionReason::TooLarge, $media->rejectionReason());
+        self::assertSame(0, $detector->detectCallCount());
+    }
+
+    public function testALocalFileVanishingBeforeInspectionIsRejectedAsUndecodableAndItsBytesArePurged(): void
+    {
+        // Le telechargement a deja reussi (c'est `downloadToTemporaryFile`
+        // qui rend ce chemin) : l'objet EST dans le bucket. Ce test simule sa
+        // disparition locale APRES le telechargement mais AVANT la lecture de
+        // sa taille — un chemin qui pointe vers rien. `MissingObject`
+        // mentirait ici, et `eraseBytes:false` laisserait les octets orphelins
+        // dans le bucket : c'est pourquoi ce cas doit rejeter avec
+        // `Undecodable` et purger.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090004');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = sprintf('%s/media-test-disparu-%s', sys_get_temp_dir(), $mediaId->toString());
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createMock(MimeTypeDetectorInterface::class);
+        $detector->expects(self::never())->method('detect');
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::Undecodable, $media->rejectionReason());
+    }
+
     public function testARedeliveredMessageForAnAlreadyTerminalMediaDoesNothing(): void
     {
         $mediaId = MediaId::fromString('01JQZ000000000000000090002');
         $media = $this->uploadedMedia($mediaId);
-        $media->markReady(
+        $media->markImageReady(
             MediaMimeType::Jpeg,
             1600,
             900,
@@ -82,8 +155,11 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         $storage->expects(self::never())->method('put');
         $storage->expects(self::never())->method('delete');
 
+        $detector = $this->createMock(MimeTypeDetectorInterface::class);
+        $detector->expects(self::never())->method('detect');
+
         $inspector = $this->createMock(ImageInspectorInterface::class);
-        $inspector->expects(self::never())->method('inspect');
+        $inspector->expects(self::never())->method('measure');
 
         $clock = $this->createMock(ClockInterface::class);
         $clock->expects(self::never())->method('now');
@@ -95,6 +171,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         $handler = new ProcessMediaCommandHandler(
             $this->repositoryReturning($media),
             $storage,
+            $detector,
             $inspector,
             $clock,
             $logger,
@@ -107,13 +184,271 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         self::assertSame(1600, $media->width());
     }
 
-    private function uploadedMedia(MediaId $mediaId): MediaObject
+    public function testADocumentIsMarkedReadyWithoutMeasurementOrThumbnail(): void
     {
+        $mediaId = MediaId::fromString('01JQZ000000000000000090005');
+        // Declare ET mesure text/plain : meme famille, meme sous-type — le
+        // cas nominal d'un document, sans desaccord a signaler.
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Text, 'notes.txt');
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        // Ni mesure ni miniature pour un document : `put()` ne doit jamais
+        // etre atteint.
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::never())->method('delete');
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Text);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+        $inspector->expects(self::never())->method('thumbnail');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Ready, $media->status());
+        self::assertSame(MediaMimeType::Text, $media->mimeType());
+        self::assertNull($media->width());
+        self::assertNull($media->height());
+        self::assertNull($media->thumbnailKey());
+    }
+
+    public function testACrossFamilyMismatchIsRejected(): void
+    {
+        // Declare image/jpeg, mesure text/plain : familles differentes
+        // (Image contre Document). La cle de stockage porte deja l'extension
+        // du declare, et le Content-Disposition servirait un nom qui ment
+        // sur son contenu : contrairement a un desaccord DANS la meme
+        // famille, celui-ci est refuse plutot que seulement journalise.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090006');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Text);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedType, $media->rejectionReason());
+    }
+
+    public function testASameFamilyMismatchIsOnlyWarned(): void
+    {
+        // Declare image/jpeg, mesure image/png : meme famille, comportement
+        // tranche 4 inchange — un signal actionnable, pas un refus.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090007');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::once())->method('put');
+        $storage->expects(self::never())->method('delete');
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Png);
+
+        $inspector = $this->createStub(ImageInspectorInterface::class);
+        $inspector->method('measure')->willReturn(new ImageDimensions(800, 600));
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector, $logger);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Ready, $media->status());
+        self::assertSame(MediaMimeType::Png, $media->mimeType());
+    }
+
+    public function testACoveredSubtypeIsAcceptedSilently(): void
+    {
+        // Declare text/markdown, mesure text/plain : cas NOMINAL des trois
+        // types texte. Un warning ici remplirait le journal de bruit non
+        // actionnable, exactement ce que « warning doit etre actionnable »
+        // interdit.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090009');
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Markdown, 'notes.md');
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::never())->method('delete');
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Text);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $logger = $this->createMock(LoggerInterface::class);
+        // `warning()` seul ne suffit pas a prouver l'absence de bruit : un
+        // rejet passe par `log($level, …)`, pas par `warning()` directement.
+        // Verifier aussi `log()` couvre le cas ou une future regression
+        // ferait passer ce chemin (accepte silencieusement) par un rejet.
+        $logger->expects(self::never())->method('warning');
+        $logger->expects(self::never())->method('log');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector, $logger);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Ready, $media->status());
+        self::assertSame(MediaMimeType::Text, $media->mimeType());
+    }
+
+    public function testAnUnsupportedTypeRejectionIsLoggedAtWarningLevel(): void
+    {
+        // `UnsupportedType` est le seul motif de rejet ou l'operateur doit
+        // regarder (deguisement de type, signal de securite) : il doit sortir
+        // en WARNING. Le handler appelle `$logger->log($level, …)`, pas
+        // `$logger->warning(…)` directement — seule une assertion sur `log()`
+        // avec le niveau attendu prouve que ce chemin est bien au bon niveau.
+        $mediaId = MediaId::fromString('01JQZ00000000000000009000C');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaRejectionReason::UnsupportedType);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('log')->with(LogLevel::WARNING, self::isString(), self::isArray());
+
+        $handler = $this->handler($media, $storage, $detector, $inspector, $logger);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedType, $media->rejectionReason());
+    }
+
+    public function testAnUnsupportedEncodingRejectionIsLoggedAtNoticeLevel(): void
+    {
+        // `UnsupportedEncoding` existe precisement pour qu'un CSV cp1252
+        // ordinaire ne declenche PAS l'alerte de securite reservee a
+        // `UnsupportedType` (plan T4 amende expres pour ce motif) : il doit
+        // sortir en NOTICE, pas en WARNING.
+        $mediaId = MediaId::fromString('01JQZ00000000000000009000D');
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Text, 'export.csv');
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaRejectionReason::UnsupportedEncoding);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('log')->with(LogLevel::NOTICE, self::isString(), self::isArray());
+
+        $handler = $this->handler($media, $storage, $detector, $inspector, $logger);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedEncoding, $media->rejectionReason());
+    }
+
+    public function testADeclaredPdfMeasuredAsTextIsRejectedRatherThanServedUnderALyingName(): void
+    {
+        // Declare application/pdf, mesure text/plain : MEME famille
+        // (Document contre Document), mais sous-type non couvert
+        // (Text->covers(Pdf) est faux). Pour un document, l'extension est la
+        // SEULE chose que l'utilisateur et son systeme d'exploitation
+        // exploitent : la cle de stockage porte deja `.pdf`, et le laisser
+        // passer servirait un fichier texte sous un nom qui ment sur son
+        // contenu — le prejudice lui-meme, pas seulement un signal.
+        $mediaId = MediaId::fromString('01JQZ00000000000000009000A');
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Pdf, 'contrat.pdf');
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Text);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedType, $media->rejectionReason());
+    }
+
+    public function testADeclaredTextMeasuredAsPdfIsRejectedTheOtherWayToo(): void
+    {
+        // Le sens inverse du cas precedent : declare text/plain, mesure
+        // application/pdf. Meme famille Document, `Pdf->covers(Text)` est
+        // faux (seul `Text` couvre quelque chose) : refuse pour la meme
+        // raison, quel que soit le sens du desaccord.
+        $mediaId = MediaId::fromString('01JQZ00000000000000009000B');
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Text, 'notes.txt');
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Pdf);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedType, $media->rejectionReason());
+    }
+
+    private function uploadedMedia(
+        MediaId $mediaId,
+        MediaMimeType $declared = MediaMimeType::Jpeg,
+        string $filename = 'photo.jpg',
+    ): MediaObject {
         $media = MediaObject::request(
             $mediaId,
             UserId::fromString(self::OWNER_ID),
-            StorageKey::forOriginal($mediaId, MediaMimeType::Jpeg),
-            MediaMimeType::Jpeg,
+            StorageKey::forOriginal($mediaId, $declared),
+            OriginalFilename::fromString($filename),
+            $declared,
             2_000,
             new \DateTimeImmutable('2026-07-26T09:00:00+00:00'),
         );
@@ -125,7 +460,9 @@ final class ProcessMediaCommandHandlerTest extends TestCase
     private function handler(
         MediaObject $media,
         MediaStorageInterface $storage,
+        MimeTypeDetectorInterface $detector,
         ImageInspectorInterface $inspector,
+        ?LoggerInterface $logger = null,
     ): ProcessMediaCommandHandler {
         $clock = $this->createStub(ClockInterface::class);
         $clock->method('now')->willReturn(new \DateTimeImmutable('2026-07-26T09:00:30+00:00'));
@@ -133,9 +470,10 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         return new ProcessMediaCommandHandler(
             $this->repositoryReturning($media),
             $storage,
+            $detector,
             $inspector,
             $clock,
-            new NullLogger(),
+            $logger ?? new NullLogger(),
         );
     }
 
@@ -148,12 +486,24 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         return $repository;
     }
 
-    private function temporaryFile(): string
+    /** Chemin unique par appel. `$size` cree un fichier creux de la taille demandee, sans en ecrire vraiment les octets sur disque. */
+    private function temporaryFile(int $size = 0): string
     {
         $path = tempnam(sys_get_temp_dir(), 'process-media-test-');
 
         if (false === $path) {
             self::fail('Impossible de creer un fichier temporaire pour le test.');
+        }
+
+        if ($size > 0) {
+            $handle = fopen($path, 'wb');
+
+            if (false === $handle) {
+                self::fail('Impossible d\'ouvrir le fichier temporaire pour le test.');
+            }
+
+            ftruncate($handle, $size);
+            fclose($handle);
         }
 
         return $path;

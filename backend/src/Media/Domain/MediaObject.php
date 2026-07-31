@@ -26,6 +26,7 @@ final class MediaObject
         private readonly MediaId $id,
         private readonly UserId $ownerId,
         private readonly StorageKey $storageKey,
+        private readonly OriginalFilename $originalFilename,
         private ?StorageKey $thumbnailKey,
         private MediaStatus $status,
         private readonly MediaMimeType $declaredMimeType,
@@ -44,6 +45,7 @@ final class MediaObject
         MediaId $id,
         UserId $ownerId,
         StorageKey $storageKey,
+        OriginalFilename $originalFilename,
         MediaMimeType $declaredMimeType,
         int $declaredSize,
         \DateTimeImmutable $now,
@@ -54,6 +56,7 @@ final class MediaObject
             $id,
             $ownerId,
             $storageKey,
+            $originalFilename,
             null,
             MediaStatus::Pending,
             $declaredMimeType,
@@ -73,6 +76,7 @@ final class MediaObject
         MediaId $id,
         UserId $ownerId,
         StorageKey $storageKey,
+        OriginalFilename $originalFilename,
         ?StorageKey $thumbnailKey,
         MediaStatus $status,
         MediaMimeType $declaredMimeType,
@@ -89,6 +93,7 @@ final class MediaObject
             $id,
             $ownerId,
             $storageKey,
+            $originalFilename,
             $thumbnailKey,
             $status,
             $declaredMimeType,
@@ -116,7 +121,7 @@ final class MediaObject
         $this->status = MediaStatus::Processing;
     }
 
-    public function markReady(
+    public function markImageReady(
         MediaMimeType $mimeType,
         int $width,
         int $height,
@@ -124,6 +129,10 @@ final class MediaObject
         StorageKey $thumbnailKey,
         \DateTimeImmutable $now,
     ): void {
+        if (MediaFamily::Image !== $mimeType->family()) {
+            throw new \InvalidArgumentException('Un media qui n\'est pas une image ne peut pas etre mesure.');
+        }
+
         $this->guardNotTerminal(MediaStatus::Ready);
 
         $this->status = MediaStatus::Ready;
@@ -140,6 +149,36 @@ final class MediaObject
             $mimeType->value,
             $width,
             $height,
+            $byteSize,
+            $now,
+        ));
+    }
+
+    /**
+     * Pas de dimensions, pas de miniature : un PDF n'en a pas. Deux methodes
+     * plutot qu'un markReady() a parametres nullables — un nullable dirait
+     * « ces valeurs sont parfois absentes », deux methodes disent « il y a deux
+     * formes de media pret, et chacune a ses obligations ».
+     */
+    public function markDocumentReady(MediaMimeType $mimeType, int $byteSize, \DateTimeImmutable $now): void
+    {
+        if (MediaFamily::Document !== $mimeType->family()) {
+            throw new \InvalidArgumentException('Une image ne peut pas etre marquee prete comme un document.');
+        }
+
+        $this->guardNotTerminal(MediaStatus::Ready);
+
+        $this->status = MediaStatus::Ready;
+        $this->mimeType = $mimeType;
+        $this->byteSize = $byteSize;
+        $this->processedAt = $now;
+
+        $this->recordEvent(new MediaWasProcessed(
+            $this->id,
+            $this->status->value,
+            $mimeType->value,
+            null,
+            null,
             $byteSize,
             $now,
         ));
@@ -179,6 +218,11 @@ final class MediaObject
     public function storageKey(): StorageKey
     {
         return $this->storageKey;
+    }
+
+    public function originalFilename(): OriginalFilename
+    {
+        return $this->originalFilename;
     }
 
     public function thumbnailKey(): ?StorageKey

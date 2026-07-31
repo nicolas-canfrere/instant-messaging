@@ -6,7 +6,9 @@ namespace App\Media\Infrastructure\Storage;
 
 use App\Media\Application\MediaStorageInterface;
 use App\Media\Application\PresignedUpload;
+use App\Media\Domain\MediaDisposition;
 use App\Media\Domain\MediaMimeType;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Domain\Identifier\MediaId;
 use Aws\Exception\AwsException;
@@ -74,12 +76,27 @@ final readonly class S3MediaStorage implements MediaStorageInterface
         return new PresignedUpload($url, $expiresAt);
     }
 
-    public function presignDownload(StorageKey $key, \DateTimeImmutable $now): string
-    {
-        $command = $this->signerClient->getCommand('GetObject', [
+    public function presignDownload(
+        StorageKey $key,
+        MediaDisposition $disposition,
+        ?OriginalFilename $filename,
+        \DateTimeImmutable $now,
+    ): string {
+        $parameters = [
             'Bucket' => $this->bucket,
             'Key' => $key->toString(),
-        ]);
+            // Toujours emis, meme sans nom : la disposition (inline/attachment)
+            // est une decision de securite, elle ne doit jamais dependre d'un
+            // parametre sans rapport (le nom du fichier).
+            'ResponseContentDisposition' => $this->contentDisposition($disposition, $filename),
+        ];
+
+        if (MediaDisposition::Attachment === $disposition) {
+            // Le navigateur ne doit rien deduire du type : il telecharge, point.
+            $parameters['ResponseContentType'] = 'application/octet-stream';
+        }
+
+        $command = $this->signerClient->getCommand('GetObject', $parameters);
 
         $url = (string) $this->signerClient
             ->createPresignedRequest($command, $now->modify(self::DOWNLOAD_TTL))
@@ -190,6 +207,37 @@ final readonly class S3MediaStorage implements MediaStorageInterface
                 throw $exception;
             }
         }
+    }
+
+    /**
+     * RFC 6266 : `filename` en ASCII pour les clients anciens, `filename*` en
+     * UTF-8 pour la verite. Les deux, parce qu'un client qui ne comprend pas
+     * `filename*` doit quand meme obtenir quelque chose de lisible.
+     *
+     * Le VO OriginalFilename a deja interdit les caracteres de controle ; il
+     * reste a neutraliser le guillemet et l'antislash, qui fermeraient la
+     * chaine citee.
+     *
+     * `$filename` peut etre absent (cas de la miniature, qui n'a pas de nom
+     * d'origine) : la disposition seule (`inline`/`attachment`) reste alors
+     * emise, sans les parametres `filename`/`filename*`.
+     */
+    private function contentDisposition(MediaDisposition $disposition, ?OriginalFilename $filename): string
+    {
+        if (null === $filename) {
+            return $disposition->value;
+        }
+
+        $name = $filename->toString();
+        $ascii = preg_replace('/[^\x20-\x7E]/', '_', $name) ?? 'fichier';
+        $ascii = str_replace(['\\', '"'], '_', $ascii);
+
+        return sprintf(
+            '%s; filename="%s"; filename*=UTF-8\'\'%s',
+            $disposition->value,
+            $ascii,
+            rawurlencode($name),
+        );
     }
 
     /** Absence genuine de l'objet ou du bucket, quelle que soit la forme exacte de la reponse AWS/MinIO. */

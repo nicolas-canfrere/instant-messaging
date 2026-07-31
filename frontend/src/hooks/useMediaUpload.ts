@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ulid } from 'ulid';
 import { api } from '../api/client';
+import { ACCEPTED_DESCRIPTION, declaredTypeFor } from '../api/declaredType';
 import { putBytes } from '../api/upload';
 
 /**
- * Cycle complet d'un envoi d'image : pré-signature → PUT direct → confirmation.
+ * Cycle complet d'un envoi de piece jointe : pre-signature → PUT direct →
+ * confirmation. Une image comme un document suivent exactement le meme
+ * cycle ; seul l'apercu differe (voir plus bas).
  *
  * ## Pourquoi un aperçu local
  *
@@ -12,6 +15,11 @@ import { putBytes } from '../api/upload';
  * a une miniature à servir, il s'écoule plusieurs secondes. Pendant ce temps,
  * le navigateur possède déjà les octets : `URL.createObjectURL(file)` fabrique
  * une URL `blob:` qui pointe vers eux, en mémoire, sans aucun réseau.
+ *
+ * Ce mecanisme ne vaut que pour une image : un PDF n'a rien a previsualiser,
+ * et `URL.createObjectURL` sur un PDF produit tout de meme une URL `blob:`
+ * valide — que rien n'affichera, et qui retiendrait quand meme les octets en
+ * memoire pour rien. `previewUrl` reste donc `null` pour un document.
  *
  * ## Pourquoi il FAUT révoquer cette URL
  *
@@ -45,14 +53,22 @@ export type PendingUpload = {
   /** Identifiant CLIENT, disponible dès le choix du fichier — l'id serveur, lui, n'arrive qu'après la pré-signature. */
   localId: string;
   fileName: string;
-  previewUrl: string;
+  /** `null` pour un document : rien a previsualiser localement (voir l'en-tete du fichier). */
+  previewUrl: string | null;
   status: PendingUploadStatus;
   /** Renseigné dès la pré-signature, donc avant même que les octets soient partis. */
   mediaId: string | null;
+  /**
+   * Pourquoi un statut `failed` — `null` pour un echec reseau (le
+   * generique « Échec » de Composer suffit). Renseigne uniquement pour un
+   * refus LOCAL de type : l'utilisateur doit savoir que ce n'est pas le
+   * reseau qui a manque, mais son fichier qui n'est pas dans l'allowlist.
+   */
+  reason: string | null;
 };
 
-/** Ce qu'une image emporte avec elle quand elle part dans un message. */
-export type TakenMedia = { mediaId: string; previewUrl: string };
+/** Ce qu'une piece jointe emporte avec elle quand elle part dans un message. */
+export type TakenMedia = { mediaId: string; previewUrl: string | null; fileName: string };
 
 export function useMediaUpload() {
   const [pending, setPending] = useState<PendingUpload[]>([]);
@@ -75,21 +91,49 @@ export function useMediaUpload() {
   const add = useCallback(
     async (file: File): Promise<void> => {
       const localId = ulid();
-      const previewUrl = URL.createObjectURL(file);
+
+      // Ce que le backend acceptera reellement — voir declaredType.ts. Ni
+      // `file.type` (peu fiable pour les documents) ni une devinette locale
+      // ne remplacent la mesure serveur ; ceci evite juste un aller-retour
+      // reseau voue a finir en 422.
+      const contentType = declaredTypeFor(file);
+
+      // Un apercu local n'a de sens que pour une image : voir l'en-tete du
+      // fichier. Pour un document refuse (contentType null), il n'y en a pas
+      // non plus.
+      const previewUrl =
+        contentType !== null && contentType.startsWith('image/') ? URL.createObjectURL(file) : null;
 
       // L'entrée apparaît AVANT tout appel réseau : l'utilisateur voit sa
       // vignette dès qu'il a choisi son fichier, pas trois secondes plus tard.
+      // Un type refuse part directement `failed` : inutile de passer par
+      // `uploading` pour un fichier qu'on sait deja rejete.
       replace((previous) => [
         ...previous,
-        { localId, fileName: file.name, previewUrl, status: 'uploading', mediaId: null },
+        {
+          localId,
+          fileName: file.name,
+          previewUrl,
+          status: contentType === null ? 'failed' : 'uploading',
+          mediaId: null,
+          reason: contentType === null ? `Type non accepté (${ACCEPTED_DESCRIPTION}).` : null,
+        },
       ]);
 
+      if (contentType === null) {
+        // Refus LOCAL : aucun appel reseau pour un fichier qu'on sait refuse
+        // (par ex. un `.zip`, ou un dossier glisse qui arrive sans type).
+        // `reason`, pose ci-dessus, porte deja le message precis affiche par
+        // la vignette (voir Composer.tsx) : rien d'autre a faire ici.
+        return;
+      }
+
       try {
-        const ticket = await api.presignUpload(file.name, file.type, file.size);
+        const ticket = await api.presignUpload(file.name, contentType, file.size);
 
         // Les octets vont DIRECTEMENT au stockage : ils ne traversent jamais
         // notre backend.
-        await putBytes(ticket.upload_url, file);
+        await putBytes(ticket.upload_url, file, contentType);
 
         // Le serveur n'a rien vu passer : sans cette confirmation, il ne saurait
         // pas qu'il y a des octets à inspecter, et le worker ne partirait jamais.
@@ -103,9 +147,9 @@ export function useMediaUpload() {
           ),
         );
       } catch {
-        // On garde la vignette, marquée en erreur, plutôt que de la faire
-        // disparaître : l'utilisateur doit comprendre que CETTE image n'est pas
-        // partie, et pouvoir la retirer lui-même.
+        // On garde la vignette, marquee en erreur, plutot que de la faire
+        // disparaitre : l'utilisateur doit comprendre que CE fichier n'est pas
+        // parti, et pouvoir le retirer lui-meme.
         replace((previous) =>
           previous.map((item) => (item.localId === localId ? { ...item, status: 'failed' } : item)),
         );
@@ -118,7 +162,9 @@ export function useMediaUpload() {
     (localId: string) => {
       const target = currentRef.current.find((item) => item.localId === localId);
 
-      if (target !== undefined) {
+      // `previewUrl` est `null` pour un document : rien a revoquer, il n'y a
+      // jamais eu de `blob:` URL creee pour lui.
+      if (target !== undefined && target.previewUrl !== null) {
         URL.revokeObjectURL(target.previewUrl);
       }
 
@@ -140,14 +186,18 @@ export function useMediaUpload() {
       .filter((item): item is PendingUpload & { mediaId: string } =>
         item.status === 'uploaded' && item.mediaId !== null,
       )
-      .map((item) => ({ mediaId: item.mediaId, previewUrl: item.previewUrl }));
+      .map((item) => ({ mediaId: item.mediaId, previewUrl: item.previewUrl, fileName: item.fileName }));
 
     // Les entrées en échec partent aussi : le compositeur repart vide, et
     // l'utilisateur n'hérite pas des vignettes du message précédent. Elles, en
     // revanche, n'ont jamais quitté ce hook — on révoque donc leurs aperçus.
     currentRef.current
       .filter((item) => item.status !== 'uploaded')
-      .forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      .forEach((item) => {
+        if (item.previewUrl !== null) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      });
 
     replace(() => []);
 
@@ -159,7 +209,11 @@ export function useMediaUpload() {
   // de se réabonner.
   useEffect(
     () => () => {
-      currentRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      currentRef.current.forEach((item) => {
+        if (item.previewUrl !== null) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      });
     },
     [],
   );
@@ -173,3 +227,12 @@ export function useMediaUpload() {
     isUploading: pending.some((item) => item.status === 'uploading'),
   };
 }
+
+/**
+ * Ce que rend `useMediaUpload()`. Le hook est desormais instancie UNE FOIS
+ * dans `ConversationView` — pas dans `Composer` — pour que le glisser-depose
+ * (qui vise toute la conversation) et le selecteur de fichiers (dans le
+ * compositeur) partagent le meme etat et le meme point d'entree `add()`.
+ * Ce type sert a le faire transiter en prop jusqu'a `Composer`.
+ */
+export type MediaUploadState = ReturnType<typeof useMediaUpload>;

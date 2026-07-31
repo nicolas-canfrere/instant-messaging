@@ -13,21 +13,29 @@ export type MessageStatus = 'pending' | 'sent' | 'failed';
 export type MediaStatus = 'pending' | 'processing' | 'ready' | 'rejected';
 
 /**
- * Une image portee par un message, cote store.
+ * Une piece jointe portee par un message, cote store — image ou document.
  *
  * `previewUrl` n'a pas d'equivalent serveur : c'est la `blob:` URL locale de
  * l'expediteur, la seule chose affichable tant que le worker n'a pas produit de
  * miniature. Elle est nulle chez tous les AUTRES membres du fil, qui n'ont pas
  * les octets — eux voient un emplacement en attente jusqu'a `message.media_ready`.
+ * Elle reste aussi nulle pour un document : il n'y a rien a previsualiser
+ * localement, meme chez l'expediteur.
+ *
+ * `mimeType` est nul tant que le worker n'a pas tranche (`pending`/`processing`).
+ * Le rendu s'appuie dessus pour choisir entre la branche image et la branche
+ * document ; a defaut, il se rabat sur l'extension de `filename`.
  */
 export type StoredMedia = {
   id: string;
   status: MediaStatus;
+  mimeType: string | null;
   url: string | null;
   thumbnailUrl: string | null;
   width: number | null;
   height: number | null;
   previewUrl: string | null;
+  filename: string;
 };
 
 export type StoredMessage = {

@@ -11,6 +11,7 @@ use App\Media\Domain\MediaNotFoundException;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRepositoryInterface;
 use App\Media\Domain\MediaStatus;
+use App\Media\Domain\OriginalFilename;
 use App\Media\Domain\StorageKey;
 use App\Shared\Application\Bus\CommandDispatcherInterface;
 use App\Shared\Domain\Identifier\MediaId;
@@ -164,6 +165,7 @@ final class PurgeOrphanMediaTest extends DatabaseTestCase
             $mediaId,
             UserId::fromString($this->userId('alice')),
             $key,
+            OriginalFilename::fromString('photo.jpg'),
             MediaMimeType::Jpeg,
             2_000,
             $createdAt,
@@ -177,7 +179,7 @@ final class PurgeOrphanMediaTest extends DatabaseTestCase
 
         if (MediaStatus::Ready === $status) {
             $thumbnailKey = StorageKey::forThumbnail($mediaId);
-            $media->markReady(MediaMimeType::Jpeg, 1_600, 900, 2_000, $thumbnailKey, $createdAt);
+            $media->markImageReady(MediaMimeType::Jpeg, 1_600, 900, 2_000, $thumbnailKey, $createdAt);
             $this->repository()->save($media);
             $this->storage()->put($thumbnailKey, self::FIXTURES . 'valide.jpg', MediaMimeType::Jpeg);
         } elseif (MediaStatus::Processing === $status) {

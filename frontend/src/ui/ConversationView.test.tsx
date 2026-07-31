@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ConversationSummary, UserSummary } from '../api/types';
 import type { Thread } from '../store/messagesReducer';
 import { emptyReceiptsState } from '../store/receiptsReducer';
@@ -40,6 +40,38 @@ function threadWith(conversationId: string, content: string): Thread {
     nextBefore: null,
     loaded: true,
   };
+}
+
+/** Un fil charge et vide : rien a afficher, rien a aller chercher. */
+function emptyThread(): Thread {
+  return { items: [], nextBefore: null, loaded: true };
+}
+
+/**
+ * Harnais par defaut pour les tests qui n'ont pas besoin de faire varier la
+ * conversation elle-meme (voir `threadWith`/`conversation` ci-dessus pour le
+ * test de non-regression sur le changement de fil, qui lui a besoin de
+ * controler chaque appel a `render`).
+ */
+function renderConversation() {
+  return render(
+    <ConversationView
+      conversation={conversation('conv-alpha', 'Alpha')}
+      thread={emptyThread()}
+      users={{ [ALICE.id]: ALICE }}
+      peers={{}}
+      meId="user-bob"
+      typingState={emptyTypingState()}
+      receiptsState={emptyReceiptsState()}
+      onLoadOlder={vi.fn()}
+      onSend={vi.fn(async () => {})}
+      onDeleteMessage={vi.fn()}
+      onEditMessage={vi.fn()}
+      onMediaExpired={vi.fn()}
+      onTyping={vi.fn()}
+      onLeave={vi.fn(async () => {})}
+    />,
+  );
 }
 
 describe('ConversationView', () => {
@@ -101,5 +133,57 @@ describe('ConversationView', () => {
     // duplication elle-meme qu'on surveille ici, pas seulement son effet
     // visible — le `<ul>` des messages est le seul de ce composant.
     expect(container.querySelectorAll('ul')).toHaveLength(1);
+  });
+
+  it('joint un fichier depose sur la conversation', async () => {
+    // La cible est toute la conversation, pas le composer : l'utilisateur ne
+    // vise pas, il lache.
+    renderConversation();
+
+    fireEvent.drop(screen.getByTestId('conversation'), {
+      dataTransfer: { files: [new File(['x'], 'notes.md', { type: '' })] },
+    });
+
+    // Comme les autres tests de ce fichier, ce depot n'utilise pas
+    // `@testing-library/jest-dom` (absent du projet) : `toBeDefined()` suffit,
+    // `findByText`/`getByText` levent deja s'ils ne trouvent rien.
+    expect(await screen.findByText('notes.md')).toBeDefined();
+  });
+
+  it('refuse un fichier non supporte sans aucun appel reseau', () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    renderConversation();
+
+    fireEvent.drop(screen.getByTestId('conversation'), {
+      dataTransfer: { files: [new File(['x'], 'archive.zip', { type: 'application/zip' })] },
+    });
+
+    expect(screen.getByText(/type non accepté/i)).toBeDefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('le voile affiche pendant le survol ne vole pas le depot au conteneur', async () => {
+    // `DropOverlay` est monte PENDANT le survol : c'est a ce moment-la que le
+    // depot doit arriver, pas apres coup. Sans `pointer-events-none` sur son
+    // contenu, ce serait le voile qui recevrait le `drop`, pas le conteneur
+    // qui porte les handlers de `useFileDrop` — le fichier disparaitrait sans
+    // message ni piece jointe. Les deux autres tests de depot ci-dessus ne
+    // couvrent pas ce cas : ils deposent directement, sans `dragenter`
+    // prealable, donc le voile n'est jamais monte au moment du `drop`.
+    renderConversation();
+    const container = screen.getByTestId('conversation');
+
+    fireEvent.dragEnter(container, { dataTransfer: { files: [], items: [] } });
+    expect(screen.getByText('Déposez pour joindre')).toBeDefined();
+
+    fireEvent.drop(container, {
+      dataTransfer: { files: [new File(['x'], 'notes.md', { type: '' })] },
+    });
+
+    expect(await screen.findByText('notes.md')).toBeDefined();
+    // Le voile redescend au depot (voir `useFileDrop`, remise a zero du
+    // compteur) : s'il restait affiche, ce serait le signe que le `drop` n'a
+    // jamais atteint le conteneur.
+    expect(screen.queryByText('Déposez pour joindre')).toBeNull();
   });
 });

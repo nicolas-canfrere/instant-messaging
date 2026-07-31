@@ -26,6 +26,7 @@ final readonly class RequestMediaUploadCommandHandler implements CommandHandlerI
             $command->mediaId,
             $command->ownerId,
             StorageKey::forOriginal($command->mediaId, $command->declaredMimeType),
+            $command->originalFilename,
             $command->declaredMimeType,
             $command->declaredSize,
             $this->clock->now(),

@@ -24,13 +24,14 @@ final readonly class DbalMediaRepository implements MediaRepositoryInterface
     {
         $this->connection->executeStatement(
             <<<'SQL'
-                INSERT INTO media_objects (id, owner_id, storage_key, status, declared_mime_type, declared_size, created_at)
-                VALUES (:id, :owner_id, :storage_key, :status, :declared_mime_type, :declared_size, :created_at)
+                INSERT INTO media_objects (id, owner_id, storage_key, original_filename, status, declared_mime_type, declared_size, created_at)
+                VALUES (:id, :owner_id, :storage_key, :original_filename, :status, :declared_mime_type, :declared_size, :created_at)
                 SQL,
             [
                 'id' => $media->id()->toString(),
                 'owner_id' => $media->ownerId()->toString(),
                 'storage_key' => $media->storageKey()->toString(),
+                'original_filename' => $media->originalFilename()->toString(),
                 'status' => $media->status()->value,
                 'declared_mime_type' => $media->declaredMimeType()->value,
                 'declared_size' => $media->declaredSize(),
@@ -43,10 +44,10 @@ final readonly class DbalMediaRepository implements MediaRepositoryInterface
 
     public function ofId(MediaId $mediaId): MediaObject
     {
-        /** @var array{id: string, owner_id: string, storage_key: string, thumbnail_key: string|null, status: string, declared_mime_type: string, declared_size: int, mime_type: string|null, width: int|null, height: int|null, byte_size: int|null, rejection_reason: string|null, created_at: string, processed_at: string|null}|false $row */
+        /** @var array{id: string, owner_id: string, storage_key: string, original_filename: string, thumbnail_key: string|null, status: string, declared_mime_type: string, declared_size: int, mime_type: string|null, width: int|null, height: int|null, byte_size: int|null, rejection_reason: string|null, created_at: string, processed_at: string|null}|false $row */
         $row = $this->connection->fetchAssociative(
             <<<'SQL'
-                SELECT id, owner_id, storage_key, thumbnail_key, status, declared_mime_type, declared_size,
+                SELECT id, owner_id, storage_key, original_filename, thumbnail_key, status, declared_mime_type, declared_size,
                        mime_type, width, height, byte_size, rejection_reason, created_at, processed_at
                 FROM media_objects
                 WHERE id = :id
