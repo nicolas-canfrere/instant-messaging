@@ -7,8 +7,8 @@ namespace App\Tests\Unit\Media\Application\Command;
 use App\Media\Application\Command\ProcessMediaCommand;
 use App\Media\Application\Command\ProcessMediaCommandHandler;
 use App\Media\Application\ImageInspectorInterface;
-use App\Media\Application\InspectedImage;
 use App\Media\Application\MediaStorageInterface;
+use App\Media\Application\MimeTypeDetectorInterface;
 use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
@@ -40,7 +40,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
     {
         $mediaId = MediaId::fromString('01JQZ000000000000000090001');
         $media = $this->uploadedMedia($mediaId);
-        $localPath = $this->temporaryFile();
+        $localPath = $this->temporaryFile(MediaObject::MAX_BYTES + 1);
 
         $storage = $this->createMock(MediaStorageInterface::class);
         $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
@@ -49,17 +49,55 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         $storage->expects(self::never())->method('put');
         $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
 
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
         $inspector = $this->createStub(ImageInspectorInterface::class);
-        $inspector->method('inspect')->willReturn(
-            new InspectedImage(MediaMimeType::Jpeg, 4000, 3000, MediaObject::MAX_BYTES + 1),
-        );
 
-        $handler = $this->handler($media, $storage, $inspector);
+        $handler = $this->handler($media, $storage, $detector, $inspector);
 
         $handler(new ProcessMediaCommand($mediaId));
 
         self::assertSame(MediaStatus::Rejected, $media->status());
         self::assertSame(MediaRejectionReason::TooLarge, $media->rejectionReason());
+    }
+
+    public function testAnOversizedFileIsRejectedWithoutEvenDetectingItsType(): void
+    {
+        // L'ordre compte : detecter d'abord ferait lire un fichier
+        // arbitrairement gros. Le detecteur ne doit PAS etre appele.
+        $mediaId = MediaId::fromString('01JQZ000000000000000090003');
+        $media = $this->uploadedMedia($mediaId);
+        $localPath = $this->temporaryFile(MediaObject::MAX_BYTES + 1);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = new class implements MimeTypeDetectorInterface {
+            private int $calls = 0;
+
+            public function detect(string $localPath): MediaMimeType
+            {
+                ++$this->calls;
+
+                return MediaMimeType::Jpeg;
+            }
+
+            public function detectCallCount(): int
+            {
+                return $this->calls;
+            }
+        };
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaRejectionReason::TooLarge, $media->rejectionReason());
+        self::assertSame(0, $detector->detectCallCount());
     }
 
     public function testARedeliveredMessageForAnAlreadyTerminalMediaDoesNothing(): void
@@ -83,8 +121,11 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         $storage->expects(self::never())->method('put');
         $storage->expects(self::never())->method('delete');
 
+        $detector = $this->createMock(MimeTypeDetectorInterface::class);
+        $detector->expects(self::never())->method('detect');
+
         $inspector = $this->createMock(ImageInspectorInterface::class);
-        $inspector->expects(self::never())->method('inspect');
+        $inspector->expects(self::never())->method('measure');
 
         $clock = $this->createMock(ClockInterface::class);
         $clock->expects(self::never())->method('now');
@@ -96,6 +137,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         $handler = new ProcessMediaCommandHandler(
             $this->repositoryReturning($media),
             $storage,
+            $detector,
             $inspector,
             $clock,
             $logger,
@@ -127,6 +169,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
     private function handler(
         MediaObject $media,
         MediaStorageInterface $storage,
+        MimeTypeDetectorInterface $detector,
         ImageInspectorInterface $inspector,
     ): ProcessMediaCommandHandler {
         $clock = $this->createStub(ClockInterface::class);
@@ -135,6 +178,7 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         return new ProcessMediaCommandHandler(
             $this->repositoryReturning($media),
             $storage,
+            $detector,
             $inspector,
             $clock,
             new NullLogger(),
@@ -150,12 +194,24 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         return $repository;
     }
 
-    private function temporaryFile(): string
+    /** Chemin unique par appel. `$size` cree un fichier creux de la taille demandee, sans en ecrire vraiment les octets sur disque. */
+    private function temporaryFile(int $size = 0): string
     {
         $path = tempnam(sys_get_temp_dir(), 'process-media-test-');
 
         if (false === $path) {
             self::fail('Impossible de creer un fichier temporaire pour le test.');
+        }
+
+        if ($size > 0) {
+            $handle = fopen($path, 'wb');
+
+            if (false === $handle) {
+                self::fail('Impossible d\'ouvrir le fichier temporaire pour le test.');
+            }
+
+            ftruncate($handle, $size);
+            fclose($handle);
         }
 
         return $path;

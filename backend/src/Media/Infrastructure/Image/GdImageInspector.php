@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace App\Media\Infrastructure\Image;
 
+use App\Media\Application\ImageDimensions;
 use App\Media\Application\ImageInspectorInterface;
-use App\Media\Application\InspectedImage;
-use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaRejectionReason;
 
 final readonly class GdImageInspector implements ImageInspectorInterface
@@ -16,38 +15,15 @@ final readonly class GdImageInspector implements ImageInspectorInterface
 
     private const int THUMBNAIL_QUALITY = 82;
 
-    public function inspect(string $localPath): InspectedImage|MediaRejectionReason
+    public function measure(string $localPath): ImageDimensions|MediaRejectionReason
     {
-        $detected = (new \finfo(FILEINFO_MIME_TYPE))->file($localPath);
-
-        if (false === $detected) {
-            return MediaRejectionReason::UnsupportedType;
-        }
-
-        $mimeType = MediaMimeType::tryFrom($detected);
-
-        if (null === $mimeType) {
-            return MediaRejectionReason::UnsupportedType;
-        }
-
-        // Le type est bon, mais un fichier tronque le porte encore : seul le
-        // decodage tranche vraiment. `@` parce que getimagesize() emet un
-        // warning PHP sur un fichier corrompu, et `failOnWarning` est actif.
-        // C'est ici, et seulement ici, que « type accepte » et « decodable »
-        // se distinguent : un GIF tronque n'est pas un type refuse.
+        // `@` parce que getimagesize() emet un warning PHP sur un fichier
+        // corrompu, et `failOnWarning` est actif dans la suite de tests.
         $size = @getimagesize($localPath);
 
-        if (false === $size) {
-            return MediaRejectionReason::Undecodable;
-        }
-
-        $bytes = filesize($localPath);
-
-        if (false === $bytes) {
-            return MediaRejectionReason::Undecodable;
-        }
-
-        return new InspectedImage($mimeType, $size[0], $size[1], $bytes);
+        return false === $size
+            ? MediaRejectionReason::Undecodable
+            : new ImageDimensions($size[0], $size[1]);
     }
 
     public function thumbnail(string $localPath, string $targetPath): void

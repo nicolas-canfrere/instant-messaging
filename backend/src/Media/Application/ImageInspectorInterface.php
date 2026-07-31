@@ -6,21 +6,20 @@ namespace App\Media\Application;
 
 use App\Media\Domain\MediaRejectionReason;
 
+/**
+ * Ne decide plus de RIEN : la detection est passee a
+ * MimeTypeDetectorInterface. Ce port ne sait que mesurer et miniaturiser, et
+ * on ne l'appelle que sur des octets deja reconnus comme une image.
+ */
 interface ImageInspectorInterface
 {
     /**
-     * Lit le type REEL des octets et mesure l'image. Rend le motif de rejet
-     * quand ce n'est pas une image exploitable :
-     * `MediaRejectionReason::UnsupportedType` si les octets ne sont pas une
-     * image de l'allowlist, `MediaRejectionReason::Undecodable` si le type
-     * est bon mais le decodage echoue (fichier tronque ou corrompu).
-     *
-     * Le type declare par le client n'entre jamais ici : c'est le point unique
-     * ou l'on decide ce qu'est vraiment le fichier. Un `Domain` dans la
-     * signature d'un port d'`Application` reste dans les clous de deptrac :
-     * c'est un type de retour, pas une dependance vers un vendor.
+     * Rend `MediaRejectionReason::Undecodable` quand le type etait bon mais
+     * que le decodage echoue : fichier tronque ou corrompu. C'est la
+     * distinction que la tranche 4 avait prise soin d'etablir, et elle
+     * survit au decoupage.
      */
-    public function inspect(string $localPath): InspectedImage|MediaRejectionReason;
+    public function measure(string $localPath): ImageDimensions|MediaRejectionReason;
 
     /** Ecrit une miniature JPEG dans `$targetPath`, ratio preserve. */
     public function thumbnail(string $localPath, string $targetPath): void;

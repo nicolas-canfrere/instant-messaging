@@ -6,6 +6,7 @@ namespace App\Media\Application\Command;
 
 use App\Media\Application\ImageInspectorInterface;
 use App\Media\Application\MediaStorageInterface;
+use App\Media\Application\MimeTypeDetectorInterface;
 use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaObject;
 use App\Media\Domain\MediaRejectionReason;
@@ -21,6 +22,7 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
     public function __construct(
         private MediaRepositoryInterface $media,
         private MediaStorageInterface $storage,
+        private MimeTypeDetectorInterface $detector,
         private ImageInspectorInterface $inspector,
         private ClockInterface $clock,
         private LoggerInterface $logger,
@@ -62,22 +64,37 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
         $thumbnailPath = null;
 
         try {
-            $inspected = $this->inspector->inspect($localPath);
+            // La taille AVANT tout le reste : rien ne plafonne un PUT pre-signe
+            // (spec T4 §3.2), donc un objet de 2 Gio peut atterrir dans le bucket.
+            // Le detecter avant de lire quoi que ce soit evite de le charger.
+            $byteSize = filesize($localPath);
 
-            if ($inspected instanceof MediaRejectionReason) {
-                // Un `.jpg` qui contient du PHP meurt ICI, pas a l'affichage.
-                // Un GIF tronque meurt ICI aussi, mais avec un motif distinct
-                // (Undecodable) : le type etait bon, seul le decodage a
-                // echoue — cette distinction est le point de ce fichier.
-                $this->reject($media, $inspected, $now, eraseBytes: true);
+            if (false === $byteSize) {
+                $this->reject($media, MediaRejectionReason::MissingObject, $now, eraseBytes: false);
 
                 return;
             }
 
-            if ($inspected->byteSize > MediaObject::MAX_BYTES) {
-                // Le plafond ne peut pas etre applique au transfert par une URL
-                // pre-signee PUT (spec §3.2) : il l'est ici.
+            if ($byteSize > MediaObject::MAX_BYTES) {
                 $this->reject($media, MediaRejectionReason::TooLarge, $now, eraseBytes: true);
+
+                return;
+            }
+
+            $mimeType = $this->detector->detect($localPath);
+
+            if ($mimeType instanceof MediaRejectionReason) {
+                // Un `.jpg` qui contient du PHP meurt ICI, pas a l'affichage.
+                $this->reject($media, $mimeType, $now, eraseBytes: true);
+
+                return;
+            }
+
+            $dimensions = $this->inspector->measure($localPath);
+
+            if ($dimensions instanceof MediaRejectionReason) {
+                // Un GIF tronque : le type etait bon, seul le decodage a echoue.
+                $this->reject($media, $dimensions, $now, eraseBytes: true);
 
                 return;
             }
@@ -87,31 +104,24 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
             $this->inspector->thumbnail($localPath, $thumbnailPath);
             $this->storage->put($thumbnailKey, $thumbnailPath, MediaMimeType::Jpeg);
 
-            $media->markReady(
-                $inspected->mimeType,
-                $inspected->width,
-                $inspected->height,
-                $inspected->byteSize,
-                $thumbnailKey,
-                $now,
-            );
+            $media->markReady($mimeType, $dimensions->width, $dimensions->height, $byteSize, $thumbnailKey, $now);
             $this->media->save($media);
 
-            if ($inspected->mimeType !== $media->declaredMimeType()) {
+            if ($mimeType !== $media->declaredMimeType()) {
                 // Signal actionnable : un client qui declare autre chose que ce
                 // qu'il envoie est un bug, ou pire.
                 $this->logger->warning('Le type declare du media {media_id} ne correspond pas aux octets', [
                     'media_id' => $media->id()->toString(),
                     'declared_mime_type' => $media->declaredMimeType()->value,
-                    'actual_mime_type' => $inspected->mimeType->value,
+                    'actual_mime_type' => $mimeType->value,
                 ]);
             }
 
             $this->logger->info('Media {media_id} pret', [
                 'media_id' => $media->id()->toString(),
-                'width' => $inspected->width,
-                'height' => $inspected->height,
-                'byte_size' => $inspected->byteSize,
+                'width' => $dimensions->width,
+                'height' => $dimensions->height,
+                'byte_size' => $byteSize,
             ]);
         } finally {
             // Les fichiers temporaires partent quoi qu'il arrive : un rejeu

@@ -80,6 +80,7 @@ services:
     App\Media\Application\Query\OrphanMediaReaderInterface: '@App\Media\Infrastructure\Persistence\DbalOrphanMediaReader'
     App\Media\Application\MediaStorageInterface: '@App\Media\Infrastructure\Storage\S3MediaStorage'
     App\Media\Application\ImageInspectorInterface: '@App\Media\Infrastructure\Image\GdImageInspector'
+    App\Media\Application\MimeTypeDetectorInterface: '@App\Media\Infrastructure\File\FinfoMimeTypeDetector'
     App\Media\Application\Contract\MediaOwnershipInterface: '@App\Media\Infrastructure\Contract\DbalMediaOwnership'
     App\Media\Application\Contract\MediaFinderInterface: '@App\Media\Infrastructure\Contract\DbalMediaFinder'
     App\Message\Domain\Port\MediaOwnershipPortInterface: '@App\Message\Infrastructure\Contract\MediaOwnershipAdapter'

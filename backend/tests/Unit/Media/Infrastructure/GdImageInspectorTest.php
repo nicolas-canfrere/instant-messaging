@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Media\Infrastructure;
 
-use App\Media\Domain\MediaMimeType;
 use App\Media\Domain\MediaRejectionReason;
 use App\Media\Infrastructure\Image\GdImageInspector;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -29,25 +28,11 @@ final class GdImageInspectorTest extends TestCase
 
     public function testAValidJpegIsMeasured(): void
     {
-        $inspected = (new GdImageInspector())->inspect(self::FIXTURES . 'valide.jpg');
+        $dimensions = (new GdImageInspector())->measure(self::FIXTURES . 'valide.jpg');
 
-        self::assertNotInstanceOf(MediaRejectionReason::class, $inspected);
-        self::assertSame(MediaMimeType::Jpeg, $inspected->mimeType);
-        self::assertSame(1600, $inspected->width);
-        self::assertSame(900, $inspected->height);
-        self::assertGreaterThan(0, $inspected->byteSize);
-    }
-
-    public function testAPhpFileRenamedJpgIsRefusedAsUnsupportedType(): void
-    {
-        // LE test de la tranche. Le nom et le Content-Type declare disent
-        // « image/jpeg » ; les octets disent « text/x-php ». Seuls les octets
-        // font foi. Le motif precis compte : un type refuse n'est pas un
-        // fichier corrompu.
-        self::assertSame(
-            MediaRejectionReason::UnsupportedType,
-            (new GdImageInspector())->inspect(self::FIXTURES . 'piege.jpg'),
-        );
+        self::assertNotInstanceOf(MediaRejectionReason::class, $dimensions);
+        self::assertSame(1600, $dimensions->width);
+        self::assertSame(900, $dimensions->height);
     }
 
     public function testATruncatedFileIsRefusedAsUndecodableRatherThanUnsupported(): void
@@ -60,7 +45,7 @@ final class GdImageInspectorTest extends TestCase
         // verifier.
         self::assertSame(
             MediaRejectionReason::Undecodable,
-            (new GdImageInspector())->inspect(self::FIXTURES . 'tronque.gif'),
+            (new GdImageInspector())->measure(self::FIXTURES . 'tronque.gif'),
         );
     }
 
