@@ -3,13 +3,14 @@ import { ulid } from 'ulid';
 import { api } from '../api/client';
 import { ProblemError } from '../api/problem';
 import { retryWithBackoff } from '../api/retry';
-import type { ApiMessage, ConversationSummary, Me, UserSummary } from '../api/types';
+import type { ApiMedia, ApiMessage, ConversationSummary, Me, UserSummary } from '../api/types';
 import { RealtimeClient, type EventSourceLike } from '../realtime/RealtimeClient';
 import {
   emptyMessagesState,
   messagesReducer,
   selectThread,
   type MessagesState,
+  type StoredMedia,
   type StoredMessage,
 } from '../store/messagesReducer';
 import { emptyPresenceState, presenceReducer } from '../store/presenceReducer';
@@ -21,6 +22,7 @@ import {
 import { useReadWatermark } from './useReadWatermark';
 import { emptyTypingState, typingReducer, type TypingState } from '../store/typingReducer';
 import { useHeartbeat } from './useHeartbeat';
+import type { TakenMedia } from './useMediaUpload';
 import { useTyping } from './useTyping';
 
 /**
@@ -40,6 +42,24 @@ function fromApiMessage(message: ApiMessage): StoredMessage {
     editedAt: message.edited_at,
     deletedAt: message.deleted_at,
     status: 'sent',
+    media: message.media.map(fromApiMedia),
+  };
+}
+
+/**
+ * `previewUrl: null` : un message venu du serveur n'a jamais d'apercu local.
+ * Meme chez l'expediteur — s'il recharge la page, ses `blob:` URL sont mortes
+ * avec l'onglet precedent, et c'est bien le serveur qui sert les images.
+ */
+function fromApiMedia(media: ApiMedia): StoredMedia {
+  return {
+    id: media.id,
+    status: media.status,
+    url: media.url,
+    thumbnailUrl: media.thumbnail_url,
+    width: media.width,
+    height: media.height,
+    previewUrl: null,
   };
 }
 
@@ -134,6 +154,15 @@ function toStoredMessage(payload: Record<string, unknown>): StoredMessage {
     editedAt: readNullableString(payload, 'edited_at'),
     deletedAt: readNullableString(payload, 'deleted_at'),
     status: 'sent',
+    // La charge utile de `message.created` ne porte PAS les medias, et c'est
+    // volontaire : au moment ou elle part, le worker n'a rien inspecte, il n'y
+    // aurait donc ni dimensions ni URL a transmettre. Chaque image arrive
+    // ensuite par son propre `message.media_ready`.
+    //
+    // Consequence a connaitre : entre les deux, un destinataire voit la bulle
+    // sans ses images. C'est la tache 10 qui la remplit — rien ici ne consomme
+    // encore `message.media_ready`.
+    media: [],
   };
 }
 
@@ -186,7 +215,7 @@ export type AppState = {
   selectConversation: (conversationId: string) => void;
   loadOlder: () => void;
   refreshConversations: () => Promise<void>;
-  send: (conversationId: string, content: string) => Promise<void>;
+  send: (conversationId: string, content: string, media?: TakenMedia[]) => Promise<void>;
   deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
   editMessage: (conversationId: string, messageId: string, content: string) => Promise<void>;
   createDirect: (peerId: string) => Promise<void>;
@@ -285,11 +314,17 @@ export function useAppState(me: Me): AppState {
   }, [loadPage]);
 
   const send = useCallback(
-    async (conversationId: string, content: string): Promise<void> => {
+    async (conversationId: string, content: string, media: TakenMedia[] = []): Promise<void> => {
       // L'identifiant est genere AVANT le premier envoi et reutilise a l'identique
       // a chaque tentative : c'est la cle d'idempotence. Le regenerer entre deux
       // essais creerait un second message a chaque reessai reussi.
       const clientMessageId = ulid();
+
+      // Une chaine vide n'est pas un contenu : un message peut desormais n'etre
+      // QUE des images. Le serveur rogne puis refuse ce qui devient vide, il
+      // faut donc lui dire `null`, pas `''`.
+      const trimmed = content.trim();
+      const payloadContent = trimmed === '' ? null : trimmed;
 
       dispatch({
         type: 'message/optimistic',
@@ -298,17 +333,41 @@ export function useAppState(me: Me): AppState {
           clientMessageId,
           conversationId,
           senderId: me.id,
-          content,
+          content: payloadContent,
           createdAt: new Date().toISOString(),
           editedAt: null,
           deletedAt: null,
           status: 'pending',
+          // `processing` et non `pending` : les octets SONT partis, c'est meme
+          // la condition pour qu'on en soit ici. Ce qui reste a faire, c'est
+          // l'inspection par le worker.
+          //
+          // L'apercu local est la seule image affichable a cet instant, le
+          // serveur n'ayant pas encore de miniature. Sa duree de vie appartient
+          // desormais au store, plus a `useMediaUpload` (cf. son en-tete).
+          media: media.map(
+            (item): StoredMedia => ({
+              id: item.mediaId,
+              status: 'processing',
+              url: null,
+              thumbnailUrl: null,
+              width: null,
+              height: null,
+              previewUrl: item.previewUrl,
+            }),
+          ),
         },
       });
 
       try {
         const { id } = await retryWithBackoff(
-          () => api.sendMessage(conversationId, clientMessageId, content),
+          () =>
+            api.sendMessage(
+              conversationId,
+              clientMessageId,
+              payloadContent,
+              media.map((item) => item.mediaId),
+            ),
           { attempts: 3 },
         );
 

@@ -26,6 +26,30 @@ export type ConversationDetail = {
   members: ConversationMember[];
 };
 
+/**
+ * Une image portee par un message, telle que le serveur la decrit.
+ *
+ * Tout est nullable sauf `id` et `status`, et ce n'est pas de la prudence : le
+ * serveur ne signe une URL que pour un media `ready`. Tant que le worker n'a
+ * pas valide les octets, il n'y a NI dimensions NI URL — on ne donne pas acces
+ * a des octets dont personne n'a encore verifie que ce sont bien des images.
+ *
+ * Les quatre etats se lisent comme une progression :
+ *  - `pending`    : pre-signe, le navigateur n'a encore rien televerse ;
+ *  - `processing` : les octets sont arrives, le worker n'a pas tranche ;
+ *  - `ready`      : valide, mesure, miniature disponible ;
+ *  - `rejected`   : refuse (mauvais type, trop gros, illisible).
+ */
+export type ApiMedia = {
+  id: string;
+  status: 'pending' | 'processing' | 'ready' | 'rejected';
+  mime_type: string | null;
+  width: number | null;
+  height: number | null;
+  url: string | null;
+  thumbnail_url: string | null;
+};
+
 export type ApiMessage = {
   id: string;
   conversation_id: string;
@@ -36,6 +60,15 @@ export type ApiMessage = {
   created_at: string;
   edited_at: string | null;
   deleted_at: string | null;
+  /** Vide pour un message texte-seul. */
+  media: ApiMedia[];
+};
+
+/** Ce que rend `POST /api/media` : de quoi televerser, rien de plus. */
+export type UploadTicket = {
+  media_id: string;
+  upload_url: string;
+  expires_at: string;
 };
 
 export type MessagePageResponse = { items: ApiMessage[]; next_before: string | null };

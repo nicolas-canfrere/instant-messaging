@@ -19,6 +19,7 @@ function serverMessage(id: string, clientMessageId: string, content = 'texte'): 
     editedAt: null,
     deletedAt: null,
     status: 'sent',
+    media: [],
   };
 }
 
@@ -55,6 +56,7 @@ function aMessage(overrides: Partial<StoredMessage> = {}): StoredMessage {
     editedAt: null,
     deletedAt: null,
     status: 'sent',
+    media: [],
     ...overrides,
   };
 }
@@ -103,6 +105,7 @@ describe('messagesReducer', () => {
         editedAt: null,
         deletedAt: null,
         status: 'pending',
+        media: [],
       },
     });
 
@@ -136,6 +139,7 @@ describe('messagesReducer', () => {
         editedAt: null,
         deletedAt: null,
         status: 'pending',
+        media: [],
       },
     });
 
@@ -200,6 +204,7 @@ describe('messagesReducer', () => {
         editedAt: null,
         deletedAt: null,
         status: 'pending',
+        media: [],
       },
     });
 
@@ -229,6 +234,7 @@ describe('messagesReducer', () => {
         editedAt: null,
         deletedAt: null,
         status: 'pending',
+        media: [],
       },
     });
     state = messagesReducer(state, {

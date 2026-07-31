@@ -22,6 +22,8 @@ vi.mock('../api/client', () => ({
     conversation: vi.fn(),
     messages: vi.fn(),
     sendMessage: vi.fn(),
+    presignUpload: vi.fn(),
+    confirmUpload: vi.fn(),
     createDirect: vi.fn(),
     createGroup: vi.fn(),
     addMembers: vi.fn(),
@@ -49,6 +51,7 @@ function apiMessage(overrides: Partial<ApiMessage> = {}): ApiMessage {
     created_at: '2026-07-26T09:00:00+00:00',
     edited_at: null,
     deleted_at: null,
+    media: [],
     ...overrides,
   };
 }

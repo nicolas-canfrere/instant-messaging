@@ -128,7 +128,7 @@ function Workspace({ me, onLogout }: { me: Me; onLogout: () => void }) {
           typingState={typingState}
           receiptsState={receiptsState}
           onLoadOlder={loadOlder}
-          onSend={(content) => send(selected.id, content)}
+          onSend={(content, media) => send(selected.id, content, media)}
           // Pas d'`await` ici : la suppression est declenchee depuis un
           // `onClick`, qui ne peut pas attendre une promesse. Mais contrairement
           // a l'ACK de livraison (qui se rattrape au message suivant, voir

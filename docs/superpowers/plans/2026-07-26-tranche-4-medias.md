@@ -3918,9 +3918,17 @@ Nicolas est novice côté front : **commenter généreusement**, et expliquer le
 - Create: `frontend/src/api/upload.ts`, `frontend/src/hooks/useMediaUpload.ts`
 - Modify: `frontend/src/ui/Composer.tsx`, `frontend/src/hooks/useAppState.ts`
 - Test: `frontend/src/hooks/useMediaUpload.test.ts`
+- Modify (non prévu) : `frontend/src/store/messagesReducer.ts` — `StoredMessage` gagne `media: StoredMedia[]`. Inévitable : sans ce champ, l'envoi optimiste ne peut pas porter ses images, ce que le Step 5 demande explicitement. Le rendu, lui, reste en tâche 10.
+- Modify (non prévu) : `frontend/src/ui/ConversationView.tsx`, `frontend/src/App.tsx` — la signature `onSend` change, elle traverse ces deux composants.
 
 **Interfaces:**
-- Produces : `ApiMedia = { id: string; status: 'pending' | 'processing' | 'ready' | 'rejected'; mime_type: string | null; width: number | null; height: number | null; url: string | null; thumbnail_url: string | null }`, et `media: ApiMedia[]` sur `ApiMessage`. `useMediaUpload()` rend `{ pending: PendingUpload[]; add(file: File): Promise<void>; remove(localId: string): void; takeMediaIds(): string[] }`.
+- Produces : `ApiMedia = { id: string; status: 'pending' | 'processing' | 'ready' | 'rejected'; mime_type: string | null; width: number | null; height: number | null; url: string | null; thumbnail_url: string | null }`, et `media: ApiMedia[]` sur `ApiMessage`. `useMediaUpload()` rend `{ pending: PendingUpload[]; add(file: File): Promise<void>; remove(localId: string): void; takeUploaded(): TakenMedia[]; isUploading: boolean }`.
+
+> **Écart au plan.** `takeMediaIds(): string[]` ne suffisait pas : le Step 5 veut un envoi optimiste qui porte les aperçus locaux, or un identifiant seul ne les transporte pas. `takeUploaded()` rend donc `{ mediaId, previewUrl }[]`.
+>
+> `takeUploaded()` vide la liste **sans révoquer** les `blob:` URL des images parties : leur propriété passe au store des messages, qui les affiche jusqu'à `message.media_ready`. Les révoquer là casserait l'image sous les yeux de l'expéditeur. Seules les entrées en échec, qui n'ont jamais quitté le hook, sont révoquées. C'est un troisième moment de révocation que le Step 4 ne mentionnait pas.
+>
+> `isUploading` en plus : le compositeur bloque l'envoi tant qu'un transfert est en cours, plutôt que de laisser partir un message amputé d'une image.
 
 - [ ] **Step 1: Types et client**
 
@@ -4034,6 +4042,10 @@ make front-typecheck
 ```
 
 Puis, dans un vrai navigateur (`make up`, `http://localhost:8080`) : choisir une image, la voir apparaître en vignette, l'envoyer, la voir passer de « en cours » à l'image.
+
+> **Fait, partiellement.** Vérifié au navigateur (Playwright, Chrome système) : la vignette apparaît dès le choix du fichier, la croix de retrait est là, `Envoyer` s'active, le compositeur se vide à l'envoi, et le message créé porte bien son média — `media_objects.status = 'ready'` et la ligne `message_media` existent en base.
+>
+> **La dernière moitié ne l'est pas** : la bulle s'affiche VIDE, `MessageList` ne rendant pas encore `media`. « La voir passer de en cours à l'image » est le sujet de la tâche 10.
 
 > Si Vite sert du code périmé après un `git checkout`, redémarrer le conteneur : `make restart SERVICE=frontend`.
 

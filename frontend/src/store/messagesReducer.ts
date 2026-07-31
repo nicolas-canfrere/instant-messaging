@@ -10,6 +10,26 @@
 
 export type MessageStatus = 'pending' | 'sent' | 'failed';
 
+export type MediaStatus = 'pending' | 'processing' | 'ready' | 'rejected';
+
+/**
+ * Une image portee par un message, cote store.
+ *
+ * `previewUrl` n'a pas d'equivalent serveur : c'est la `blob:` URL locale de
+ * l'expediteur, la seule chose affichable tant que le worker n'a pas produit de
+ * miniature. Elle est nulle chez tous les AUTRES membres du fil, qui n'ont pas
+ * les octets — eux voient un emplacement en attente jusqu'a `message.media_ready`.
+ */
+export type StoredMedia = {
+  id: string;
+  status: MediaStatus;
+  url: string | null;
+  thumbnailUrl: string | null;
+  width: number | null;
+  height: number | null;
+  previewUrl: string | null;
+};
+
 export type StoredMessage = {
   id: string | null;
   clientMessageId: string;
@@ -20,6 +40,8 @@ export type StoredMessage = {
   editedAt: string | null;
   deletedAt: string | null;
   status: MessageStatus;
+  /** Vide pour un message texte-seul. */
+  media: StoredMedia[];
 };
 
 export type Thread = {

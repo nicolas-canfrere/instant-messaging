@@ -33,6 +33,7 @@ function message(overrides: Partial<StoredMessage>): StoredMessage {
     editedAt: null,
     deletedAt: null,
     status: 'sent',
+    media: [],
     ...overrides,
   };
 }

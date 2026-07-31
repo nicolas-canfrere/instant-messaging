@@ -34,6 +34,7 @@ function threadWith(conversationId: string, content: string): Thread {
         editedAt: null,
         deletedAt: null,
         status: 'sent',
+        media: [],
       },
     ],
     nextBefore: null,
