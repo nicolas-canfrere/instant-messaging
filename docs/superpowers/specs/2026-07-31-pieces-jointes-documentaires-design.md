@@ -279,8 +279,9 @@ Nouveau VO dans `Media/Domain/`. Le nom de fichier cesse d'être « uniquement d
 client » (commentaire actuel de `PresignUploadPayload`) : il devient une donnée persistée qui finit
 dans un **en-tête HTTP**. Il lui faut donc un gardien.
 
-Invariants : non vide après `trim`, ≤ 255 octets, **aucun caractère de contrôle U+0000–U+001F ni
-U+007F** — ce qui couvre `\r` et `\n`, donc l'injection d'en-tête. UTF-8 valide.
+Invariants : non vide après `trim`, ≤ 255 **caractères** (même unité que l'`Assert\Length` existante
+du payload), **aucun caractère de contrôle U+0000–U+001F ni U+007F** — ce qui couvre `\r` et `\n`,
+donc l'injection d'en-tête. UTF-8 valide.
 
 Le VO ne fait **pas** de « sanitisation » silencieuse : il refuse. Un nom qu'on nettoie en douce est
 un nom qu'on ne peut plus expliquer à l'utilisateur, et la contrainte du payload doit produire un
@@ -343,14 +344,18 @@ public function presignDownload(
 ): string;
 ```
 
-`MediaDisposition` est une enum de `Media/Domain/` : `Inline`, `Attachment`. Le nom est `null` pour
-`Inline` — une miniature n'a pas de nom à porter.
+`MediaDisposition` est une enum de `Media/Domain/` : `Inline`, `Attachment`. Le nom est `null`
+uniquement pour une miniature, qui n'a pas de nom à porter.
 
 | Cible | Disposition | En-têtes signés |
 |---|---|---|
-| Miniature (toujours JPEG) | `Inline` | aucun |
-| Original, famille `Image` | `Inline` | aucun |
-| Original, famille `Document` | `Attachment` | `ResponseContentDisposition`, `ResponseContentType: application/octet-stream` |
+| Miniature (toujours JPEG) | `Inline`, sans nom | aucun |
+| Original, famille `Image` | `Inline` **avec nom** | `ResponseContentDisposition: inline; filename="photo.jpg"` |
+| Original, famille `Document` | `Attachment` | `ResponseContentDisposition: attachment; …`, `ResponseContentType: application/octet-stream` |
+
+`inline` **avec** un nom n'est pas une contradiction : l'image continue de s'afficher dans `<img>`,
+mais « Enregistrer sous… » propose enfin `photo.jpg` au lieu de `01JX….jpg`. C'est ce qui rend le
+commit 1 du §8 utile à lui seul, avant tout type nouveau.
 
 ### 4.2 Pourquoi `attachment` sur tous les documents
 
@@ -492,7 +497,7 @@ TDD : le test qui décrit le comportement avant le code.
   `Markdown`, `Csv` ne couvre pas `Text`, `Jpeg` ne couvre pas `Png`.
 - `MediaMimeType::family()` et `extension()` sur les 8 cas.
 - `OriginalFilename` — accepte « rapport été.pdf » ; refuse `"a\r\nX-Injection: y"`, la chaîne vide,
-  256 octets, un octet `NUL`, de l'UTF-8 invalide.
+  256 caractères, un octet `NUL`, de l'UTF-8 invalide.
 - `StorageKey` — les 8 extensions passent, `media/01JX….exe` échoue, `../etc/passwd` échoue.
 - `MediaObject::markDocumentReady()` — enregistre `MediaWasProcessed` avec `width`/`height` à `null` ;
   refuse un type de famille `Image` ; refuse depuis un état terminal.
