@@ -74,7 +74,8 @@ violation, même si deptrac ne la voit pas.
 | `SecurityUser` (tous les contrôleurs en dépendent) | `Shared/Infrastructure/Security/` |
 | **Contrats de lecture publiés** | `{Contexte}/Application/Contract/` — **pas** dans `Shared` : le producteur possède sa surface publiée |
 | Implémentation d'un contrat | `{Contexte}/Infrastructure/Contract/` |
-| Le besoin, côté consommateur | `{Contexte}/Domain/Port/` + adaptateur qui délègue au contrat |
+| Le besoin, côté consommateur, **quand il se traduit** | `{Contexte}/Domain/Port/` + adaptateur qui délègue au contrat |
+| Le besoin, côté consommateur, **sans traduction** | rien — nommer le contrat publié directement ([ADR 0001](docs/adr/0001-cross-context-communication.md)) |
 | VO spécifiques (`MessageContent`, `DirectKey`, `Topic`…) | dans leur contexte |
 
 **Lectures** : contrat publié (`{Chose}FinderInterface` + `{Chose}View`, jamais l'agrégat).

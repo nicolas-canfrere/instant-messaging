@@ -41,6 +41,22 @@ Il l'implémente dans `App\{Contexte}\Infrastructure\Contract\`, et possède seu
 Le consommateur garde **son propre port de domaine** (`Domain\Port\`), qui exprime son besoin dans sa
 propre langue ; son adaptateur d'infrastructure délègue au contrat du producteur.
 
+**Amendé le 2026-07-29 — ce port n'est dû que s'il traduit réellement quelque chose.** Un port
+gagne sa place quand sa signature diffère de celle du contrat : vocabulaire propre au
+consommateur, besoin plus étroit que la surface offerte, type de retour retraduit. Quand
+l'adaptateur se contente de réexpédier l'appel avec la **même signature**, il n'y a pas de
+traduction — seulement une interface recopiée. Dans ce cas, **le consommateur nomme le contrat
+publié directement**, quelle que soit sa couche.
+
+C'est déjà l'usage majoritaire du dépôt : les cinq consommateurs de
+`ConversationMembershipInterface`, tous en `Message\Application\`, le nomment sans port. La
+formulation initiale ci-dessus était donc plus stricte que la pratique ; cet amendement aligne
+la règle sur elle plutôt que l'inverse.
+
+Ce que le port ne doit **jamais** servir à contourner : la dépendance elle-même. Nommer
+directement un contrat publié reste un couplage inter-contextes, et il passe par la même
+allowlist de `deptrac-contexts.yaml`. L'amendement supprime une indirection, pas une friction.
+
 Tranche 1 — un seul contrat : `Conversation` publie `MemberConversationsFinderInterface`, consommé
 par `Realtime` pour construire les topics d'abonnement.
 

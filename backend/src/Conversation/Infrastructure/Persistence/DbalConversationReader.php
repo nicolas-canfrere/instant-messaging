@@ -8,18 +8,26 @@ use App\Conversation\Application\Query\ConversationDetailView;
 use App\Conversation\Application\Query\ConversationReaderInterface;
 use App\Conversation\Application\Query\ConversationView;
 use App\Conversation\Domain\DirectKey;
-use App\Conversation\Domain\Port\UnreadCounterPortInterface;
+use App\Message\Application\Contract\UnreadCounterInterface;
 use App\Shared\Domain\Identifier\ConversationId;
 use App\Shared\Domain\Identifier\UserId;
 use App\Shared\Infrastructure\Persistence\DatabaseTimestamp;
 use Doctrine\DBAL\Connection;
 
-/** Cote lecture : SQL direct vers un DTO, sans passer par le domaine. */
+/**
+ * Cote lecture : SQL direct vers un DTO, sans passer par le domaine.
+ *
+ * Nomme `UnreadCounterInterface`, le contrat publie de Message, sans port
+ * intermediaire : le port qui existait ici avait la MEME signature que le
+ * contrat, et son adaptateur se contentait de reexpedier l'appel. Un port se
+ * justifie quand il traduit — vocabulaire propre, besoin plus etroit, retour
+ * retraduit ; pas quand il recopie (ADR 0001, amendement du 2026-07-29).
+ */
 final readonly class DbalConversationReader implements ConversationReaderInterface
 {
     public function __construct(
         private Connection $connection,
-        private UnreadCounterPortInterface $unread,
+        private UnreadCounterInterface $unread,
     ) {
     }
 
