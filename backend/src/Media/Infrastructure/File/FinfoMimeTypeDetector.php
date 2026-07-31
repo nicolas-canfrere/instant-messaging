@@ -50,10 +50,10 @@ final readonly class FinfoMimeTypeDetector implements MimeTypeDetectorInterface
         // donne text/x-shellscript, du C donne text/x-c. Plutot qu'une
         // denylist, on VERIFIE les octets — c'est fidele a « les octets
         // decident », et ca vaut mieux qu'un parametre charset declaratif.
-        return $this->isRealText($localPath) ? MediaMimeType::Text : MediaRejectionReason::UnsupportedType;
+        return $this->readAsText($localPath);
     }
 
-    private function isRealText(string $localPath): bool
+    private function readAsText(string $localPath): MediaMimeType|MediaRejectionReason
     {
         // Lire le fichier entier est sans danger PARCE QUE le handler a deja
         // rejete tout ce qui depasse MediaObject::MAX_BYTES avant d'appeler
@@ -61,9 +61,26 @@ final readonly class FinfoMimeTypeDetector implements MimeTypeDetectorInterface
         $bytes = @file_get_contents($localPath);
 
         if (false === $bytes) {
-            return false;
+            return MediaRejectionReason::UnsupportedType;
         }
 
-        return !str_contains($bytes, "\0") && mb_check_encoding($bytes, 'UTF-8');
+        if (str_contains($bytes, "\0")) {
+            // Un octet NUL n'est jamais du texte legitime — c'est un signal
+            // de deguisement, au meme titre qu'un HTML renomme .txt. En
+            // pratique libmagic classe deja ces octets `application/octet-stream`
+            // et le rejet intervient plus haut (garde `text/`) ; cette
+            // branche reste ecrite pour le jour ou libmagic changerait d'avis.
+            return MediaRejectionReason::UnsupportedType;
+        }
+
+        if (!mb_check_encoding($bytes, 'UTF-8')) {
+            // Texte legitime, encodage different — un CSV exporte par Excel
+            // en cp1252, par exemple. Ce n'est PAS un deguisement : motif
+            // distinct pour ne pas declencher le warning reserve au signal
+            // de securite.
+            return MediaRejectionReason::UnsupportedEncoding;
+        }
+
+        return MediaMimeType::Text;
     }
 }

@@ -19,4 +19,12 @@ enum MediaRejectionReason: string
     case TooLarge = 'too_large';
     /** Le type est bon mais le decodage echoue : fichier tronque ou corrompu. */
     case Undecodable = 'undecodable';
+    /**
+     * Reconnu comme du texte par finfo, mais pas encode en UTF-8 : un CSV
+     * exporte par Excel en cp1252, par exemple. Ordinaire, pas un deguisement
+     * — distinct de `UnsupportedType` precisement pour ne pas declencher le
+     * `warning` reserve a un signal de securite (CLAUDE.md, « warning doit
+     * etre actionnable »).
+     */
+    case UnsupportedEncoding = 'unsupported_encoding';
 }

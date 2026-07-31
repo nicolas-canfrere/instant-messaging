@@ -308,6 +308,67 @@ final class ProcessMediaCommandHandlerTest extends TestCase
         self::assertSame(MediaMimeType::Text, $media->mimeType());
     }
 
+    public function testADeclaredPdfMeasuredAsTextIsRejectedRatherThanServedUnderALyingName(): void
+    {
+        // Declare application/pdf, mesure text/plain : MEME famille
+        // (Document contre Document), mais sous-type non couvert
+        // (Text->covers(Pdf) est faux). Pour un document, l'extension est la
+        // SEULE chose que l'utilisateur et son systeme d'exploitation
+        // exploitent : la cle de stockage porte deja `.pdf`, et le laisser
+        // passer servirait un fichier texte sous un nom qui ment sur son
+        // contenu — le prejudice lui-meme, pas seulement un signal.
+        $mediaId = MediaId::fromString('01JQZ00000000000000009000A');
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Pdf, 'contrat.pdf');
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Text);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedType, $media->rejectionReason());
+    }
+
+    public function testADeclaredTextMeasuredAsPdfIsRejectedTheOtherWayToo(): void
+    {
+        // Le sens inverse du cas precedent : declare text/plain, mesure
+        // application/pdf. Meme famille Document, `Pdf->covers(Text)` est
+        // faux (seul `Text` couvre quelque chose) : refuse pour la meme
+        // raison, quel que soit le sens du desaccord.
+        $mediaId = MediaId::fromString('01JQZ00000000000000009000B');
+        $media = $this->uploadedMedia($mediaId, MediaMimeType::Text, 'notes.txt');
+        $localPath = $this->temporaryFile(4_096);
+
+        $storage = $this->createMock(MediaStorageInterface::class);
+        $storage->expects(self::once())->method('downloadToTemporaryFile')->with($media->storageKey())->willReturn($localPath);
+        $storage->expects(self::never())->method('put');
+        $storage->expects(self::once())->method('delete')->with($media->storageKey(), $mediaId);
+
+        $detector = $this->createStub(MimeTypeDetectorInterface::class);
+        $detector->method('detect')->willReturn(MediaMimeType::Pdf);
+
+        $inspector = $this->createMock(ImageInspectorInterface::class);
+        $inspector->expects(self::never())->method('measure');
+
+        $handler = $this->handler($media, $storage, $detector, $inspector);
+
+        $handler(new ProcessMediaCommand($mediaId));
+
+        self::assertSame(MediaStatus::Rejected, $media->status());
+        self::assertSame(MediaRejectionReason::UnsupportedType, $media->rejectionReason());
+    }
+
     private function uploadedMedia(
         MediaId $mediaId,
         MediaMimeType $declared = MediaMimeType::Jpeg,

@@ -115,9 +115,22 @@ final readonly class ProcessMediaCommandHandler implements CommandHandlerInterfa
             }
 
             if (!$mimeType->covers($declared)) {
-                // Meme famille, sous-type different (jpeg declare, png reel) :
-                // signal actionnable, mais pas de refus — comportement
-                // tranche 4 inchange.
+                if (MediaFamily::Document === $mimeType->family()) {
+                    // Meme famille Document, sous-type non couvert (pdf
+                    // declare, texte mesure) : pour un document, l'extension
+                    // est la SEULE chose que l'utilisateur et son systeme
+                    // d'exploitation exploitent — un nom qui ment est le
+                    // prejudice lui-meme, pas un signal a journaliser en
+                    // laissant passer.
+                    $this->reject($media, MediaRejectionReason::UnsupportedType, $now, eraseBytes: true);
+
+                    return;
+                }
+
+                // Meme famille Image, sous-type non couvert (jpeg declare,
+                // png reel) : le navigateur ne fait pas confiance a
+                // l'extension pour une image, donc un signal actionnable
+                // suffit — comportement tranche 4 inchange.
                 $this->logger->warning('Le type declare du media {media_id} ne correspond pas aux octets', [
                     'media_id' => $media->id()->toString(),
                     'declared_mime_type' => $declared->value,
