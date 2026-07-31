@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ulid } from 'ulid';
 import { api } from '../api/client';
-import { declaredTypeFor } from '../api/declaredType';
+import { ACCEPTED_DESCRIPTION, declaredTypeFor } from '../api/declaredType';
 import { putBytes } from '../api/upload';
 
 /**
@@ -58,6 +58,13 @@ export type PendingUpload = {
   status: PendingUploadStatus;
   /** Renseigné dès la pré-signature, donc avant même que les octets soient partis. */
   mediaId: string | null;
+  /**
+   * Pourquoi un statut `failed` — `null` pour un echec reseau (le
+   * generique « Échec » de Composer suffit). Renseigne uniquement pour un
+   * refus LOCAL de type : l'utilisateur doit savoir que ce n'est pas le
+   * reseau qui a manque, mais son fichier qui n'est pas dans l'allowlist.
+   */
+  reason: string | null;
 };
 
 /** Ce qu'une piece jointe emporte avec elle quand elle part dans un message. */
@@ -109,6 +116,7 @@ export function useMediaUpload() {
           previewUrl,
           status: contentType === null ? 'failed' : 'uploading',
           mediaId: null,
+          reason: contentType === null ? `Type non accepté (${ACCEPTED_DESCRIPTION}).` : null,
         },
       ]);
 
@@ -219,3 +227,12 @@ export function useMediaUpload() {
     isUploading: pending.some((item) => item.status === 'uploading'),
   };
 }
+
+/**
+ * Ce que rend `useMediaUpload()`. Le hook est desormais instancie UNE FOIS
+ * dans `ConversationView` — pas dans `Composer` — pour que le glisser-depose
+ * (qui vise toute la conversation) et le selecteur de fichiers (dans le
+ * compositeur) partagent le meme etat et le meme point d'entree `add()`.
+ * Ce type sert a le faire transiter en prop jusqu'a `Composer`.
+ */
+export type MediaUploadState = ReturnType<typeof useMediaUpload>;

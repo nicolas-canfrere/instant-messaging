@@ -1,12 +1,19 @@
 import { useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { ACCEPT_ATTRIBUTE } from '../api/declaredType';
-import { useMediaUpload, type TakenMedia } from '../hooks/useMediaUpload';
+import type { MediaUploadState, TakenMedia } from '../hooks/useMediaUpload';
 
 type Props = {
   /** Rend la promesse de l'envoi, mais le composant ne l'attend pas : voir `submit`. */
   onSend: (content: string, media: TakenMedia[]) => Promise<void>;
   /** Signale la frappe. L'etranglement vit dans `useTyping`, pas ici : ce composant reste bete. */
   onTyping: () => void;
+  /**
+   * Instancie par `ConversationView`, pas ici : le glisser-depose sur toute
+   * la conversation (voir `useFileDrop` dans `ConversationView`) doit
+   * ajouter au MEME etat que le selecteur de fichiers ci-dessous, sans quoi
+   * les deux chemins d'ajout divergeraient.
+   */
+  uploads: MediaUploadState;
 };
 
 /**
@@ -19,9 +26,8 @@ type Props = {
  * declenche par `onSend`. Toute sa mecanique reste malgre tout hors du
  * composant, dans `useMediaUpload` — ici on n'affiche que ce qu'il rend.
  */
-export function Composer({ onSend, onTyping }: Props) {
+export function Composer({ onSend, onTyping, uploads }: Props) {
   const [content, setContent] = useState('');
-  const uploads = useMediaUpload();
 
   // Reference sur l'`<input type="file">` pour deux raisons : le declencher
   // depuis un vrai bouton (l'input natif est masque, son rendu par defaut
@@ -117,8 +123,11 @@ export function Composer({ onSend, onTyping }: Props) {
               )}
 
               {item.status === 'failed' && (
-                <span className="absolute inset-0 flex items-center justify-center rounded bg-red-50/80 text-xs text-red-700">
-                  Échec
+                <span className="absolute inset-0 flex items-center justify-center rounded bg-red-50/80 p-1 text-center text-[10px] text-red-700">
+                  {/* `reason` n'est renseigne que pour un refus LOCAL de type
+                      (voir useMediaUpload) : un echec reseau reste sur ce
+                      texte generique, qui ne pretend pas connaitre la cause. */}
+                  {item.reason ?? 'Échec'}
                 </span>
               )}
 
